@@ -9,6 +9,22 @@ export async function resetDb(): Promise<void> {
   await env.DB.batch(TABLES.map((table) => env.DB.prepare(`DELETE FROM ${table}`)));
 }
 
+/** Apaga todos os objetos do R2 de teste (o estado do R2 também não é isolado entre testes do mesmo ficheiro). */
+export async function resetStorage(): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await env.FILES.list({ cursor });
+    if (page.objects.length > 0) await env.FILES.delete(page.objects.map((object) => object.key));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+/** D1 e R2 limpos: usar em `beforeEach` nos testes que gravam ficheiros. */
+export async function resetState(): Promise<void> {
+  await resetDb();
+  await resetStorage();
+}
+
 interface ApiInit {
   method?: string;
   json?: unknown;

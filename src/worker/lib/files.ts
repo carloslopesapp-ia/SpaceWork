@@ -22,3 +22,16 @@ export function rowToFile(row: FileRow): FileItem {
     createdAt: row.created_at,
   };
 }
+
+/** Chave do ficheiro no R2: opaca, sem nome nem caminho (mover e renomear só mexem na D1). */
+export function r2KeyFor(userId: string, fileId: string): string {
+  return `u/${userId}/${fileId}`;
+}
+
+const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
+
+/** `type/subtype` em minúsculas, sem parâmetros; qualquer coisa inválida vira `application/octet-stream`. */
+export function sanitizeMime(raw: string | undefined): string {
+  const type = (raw ?? "").split(";")[0].trim().toLowerCase();
+  return MIME_PATTERN.test(type) ? type : "application/octet-stream";
+}
