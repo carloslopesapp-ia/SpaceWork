@@ -8,6 +8,8 @@ import { hashPassword } from "../src/worker/lib/crypto.ts";
 import { isValidEmail, isValidPassword, normalizeEmail } from "../src/worker/lib/validation.ts";
 
 const DEFAULT_MASTER_QUOTA_BYTES = 10 * 1024 ** 3;
+// Build child environment without MASTER_* variables (never pass them to wrangler).
+const { MASTER_PASSWORD: _password, MASTER_EMAIL: _email, MASTER_QUOTA_BYTES: _quota, ...childEnv } = process.env;
 
 function fail(message: string): never {
   console.error(`Erro: ${message}`);
@@ -24,7 +26,7 @@ function d1Execute(target: string, sql: string): Array<{ results: unknown[] }> {
   const stdout = execFileSync(
     "npx",
     ["wrangler", "d1", "execute", "DB", target, "--json", "--command", sql],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+    { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], env: childEnv },
   );
   return JSON.parse(stdout.slice(stdout.indexOf("[")));
 }
@@ -32,7 +34,17 @@ function d1Execute(target: string, sql: string): Array<{ results: unknown[] }> {
 const target = parseTarget(process.argv.slice(2));
 const email = normalizeEmail(process.env.MASTER_EMAIL ?? "");
 const password = process.env.MASTER_PASSWORD ?? "";
-const quotaBytes = Number.parseInt(process.env.MASTER_QUOTA_BYTES ?? "", 10) || DEFAULT_MASTER_QUOTA_BYTES;
+
+// Validate MASTER_QUOTA_BYTES strictly: if defined, must be a positive safe integer.
+let quotaBytes = DEFAULT_MASTER_QUOTA_BYTES;
+if (process.env.MASTER_QUOTA_BYTES) {
+  const raw = process.env.MASTER_QUOTA_BYTES;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    fail("MASTER_QUOTA_BYTES inválido: tem de ser um número inteiro de bytes maior que 0.");
+  }
+  quotaBytes = n;
+}
 
 if (!isValidEmail(email) || email.includes("'")) fail("MASTER_EMAIL em falta ou inválido.");
 if (!isValidPassword(password)) fail("MASTER_PASSWORD em falta (tem de ter entre 8 e 128 caracteres).");
