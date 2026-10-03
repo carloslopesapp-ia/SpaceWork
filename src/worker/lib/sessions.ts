@@ -39,3 +39,19 @@ export async function findSession(
     .first<UserRow>();
   return row ? { user: rowToAuthUser(row), tokenHash } : null;
 }
+
+export async function deleteSessionByHash(db: D1Database, tokenHash: string): Promise<void> {
+  await db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(tokenHash).run();
+}
+
+/** Apaga as sessões de um utilizador, exceto (opcionalmente) a indicada. */
+export async function deleteUserSessions(
+  db: D1Database,
+  userId: string,
+  exceptTokenHash = "",
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2")
+    .bind(userId, exceptTokenHash)
+    .run();
+}

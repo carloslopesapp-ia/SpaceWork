@@ -1,10 +1,11 @@
 import { Hono, type Context } from "hono";
+import { getCookie } from "hono/cookie";
 import { getConfig } from "../config";
 import { ApiError, isUniqueViolation } from "../errors";
-import { setSessionCookie } from "../lib/cookies";
-import { hashPassword, verifyPassword } from "../lib/crypto";
+import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from "../lib/cookies";
+import { hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
-import { createSession } from "../lib/sessions";
+import { createSession, deleteSessionByHash, deleteUserSessions } from "../lib/sessions";
 import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
 import { isValidEmail, isValidPassword, normalizeEmail } from "../lib/validation";
 import { requireAuth } from "../middleware/auth";
@@ -113,6 +114,43 @@ auth.post("/login", async (c) => {
   return c.json({ user: toPublicUser(rowToAuthUser(row)) });
 });
 
+auth.post("/logout", async (c) => {
+  const token = getCookie(c, SESSION_COOKIE);
+  if (token) await deleteSessionByHash(c.env.DB, await sha256Hex(token));
+  clearSessionCookie(c);
+  return c.body(null, 204);
+});
+
 auth.get("/me", requireAuth, (c) => {
   return c.json({ user: toPublicUser(c.get("user")) });
+});
+
+auth.post("/password", requireAuth, async (c) => {
+  const user = c.get("user");
+  const body = await readBody(c);
+  const currentPassword = readString(body, "currentPassword");
+  const newPassword = readString(body, "newPassword");
+  if (!isValidPassword(newPassword)) {
+    throw new ApiError(400, "invalid_password", "A senha deve ter entre 8 e 128 caracteres.");
+  }
+
+  const db = c.env.DB;
+  // Regista a tentativa antes de verificar a senha, numa só instrução atómica (ver login-limit.ts).
+  if (!(await tryRecordAttempt(db, user.email))) throw new ApiError(429, ...LOCKED_OUT);
+
+  const row = await db
+    .prepare("SELECT password_hash FROM users WHERE id = ?1")
+    .bind(user.id)
+    .first<{ password_hash: string }>();
+  if (!row || !(await verifyPassword(currentPassword, row.password_hash))) {
+    throw new ApiError(400, "invalid_current_password", "A senha atual está incorreta.");
+  }
+
+  await clearFailures(db, user.email);
+  await db
+    .prepare("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+    .bind(await hashPassword(newPassword), user.id)
+    .run();
+  await deleteUserSessions(db, user.id, c.get("sessionTokenHash"));
+  return c.body(null, 204);
 });
