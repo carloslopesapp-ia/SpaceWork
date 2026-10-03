@@ -40,4 +40,19 @@ describe("getConfig", () => {
       sessionTtlDays: 14,
     });
   });
+
+  it("rejeita valores malformados (com sufixos, decimais ou underscores)", () => {
+    const malformed = {
+      DEFAULT_QUOTA_BYTES: "100MB",
+      MAX_UPLOAD_BYTES: "1.5",
+      TRASH_RETENTION_DAYS: "12abc",
+      SESSION_TTL_DAYS: "1_000",
+    } as unknown as Env;
+    expect(getConfig(malformed)).toEqual({
+      defaultQuotaBytes: 1_073_741_824,
+      maxUploadBytes: 104_857_600,
+      trashRetentionDays: 30,
+      sessionTtlDays: 14,
+    });
+  });
 });

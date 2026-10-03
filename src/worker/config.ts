@@ -6,8 +6,8 @@ export interface AppConfig {
 }
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0 ? n : fallback;
 }
 
 /** Lê as variáveis de wrangler.jsonc (sempre strings) e aplica os valores por defeito da especificação. */
