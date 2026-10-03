@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "spacework",
+  "compatibility_date": "2026-10-02",
+  "main": "./src/worker/index.ts",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spacework",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "spacework-files" }],
+  "vars": {
+    "DEFAULT_QUOTA_BYTES": "1073741824",
+    "MAX_UPLOAD_BYTES": "104857600",
+    "TRASH_RETENTION_DAYS": "30",
+    "SESSION_TTL_DAYS": "14"
+  }
+}
