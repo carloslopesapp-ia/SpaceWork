@@ -1,0 +1,60 @@
+import { Navigate, NavLink, Outlet } from "react-router";
+import { useLogout, useMe } from "../auth";
+import { Button } from "./Button";
+import { UsageBar } from "./UsageBar";
+
+function navClass({ isActive }: { isActive: boolean }): string {
+  return `block rounded-lg px-3 py-2 text-sm font-medium ${
+    isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-100"
+  }`;
+}
+
+/** Layout das páginas autenticadas: barra lateral com navegação, uso de espaço e saída. */
+export default function AppLayout() {
+  const me = useMe();
+  const logout = useLogout();
+
+  if (me.isPending) return <p className="p-8 text-slate-500">A carregar…</p>;
+  if (me.isError) {
+    return (
+      <p role="alert" className="p-8 text-red-700">
+        Não foi possível contactar o servidor. Tente novamente.
+      </p>
+    );
+  }
+  if (!me.data) return <Navigate to="/login" replace />;
+  const user = me.data;
+
+  return (
+    <div className="min-h-screen md:flex">
+      <aside className="flex shrink-0 flex-col gap-6 border-b border-slate-200 bg-white p-4 md:min-h-screen md:w-64 md:border-r md:border-b-0">
+        <div className="text-xl font-bold tracking-tight text-indigo-600">SpaceWork</div>
+        <nav className="flex gap-1 md:flex-col" aria-label="Principal">
+          <NavLink to="/" end className={navClass}>
+            Meu espaço
+          </NavLink>
+          <NavLink to="/conta" className={navClass}>
+            Conta
+          </NavLink>
+        </nav>
+        <div className="space-y-4 md:mt-auto">
+          <UsageBar usedBytes={user.usedBytes} quotaBytes={user.quotaBytes} />
+          <div className="truncate text-xs text-slate-500" title={user.email}>
+            {user.email}
+          </div>
+          <Button
+            variant="secondary"
+            className="w-full"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            Sair
+          </Button>
+        </div>
+      </aside>
+      <main className="min-w-0 flex-1 p-6 md:p-8">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
