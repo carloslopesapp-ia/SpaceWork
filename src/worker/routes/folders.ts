@@ -1,5 +1,5 @@
 import { searchKey } from "../../shared/names";
-import { ApiError, isUniqueViolation } from "../errors";
+import { ApiError, isForeignKeyViolation, isUniqueViolation } from "../errors";
 import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
 import {
   breadcrumbFor,
@@ -7,6 +7,7 @@ import {
   parseFolderRef,
   requireFolder,
   rowToFolder,
+  wouldCreateCycle,
   type FolderRow,
 } from "../lib/folders";
 import { readJsonObject, readString } from "../lib/http";
@@ -83,4 +84,90 @@ folders.post("/", async (c) => {
     throw error;
   }
   return c.json({ folder: { id, name, parentId, createdAt } }, 201);
+});
+
+/** Renomeia e/ou move uma pasta (`parentId: null` ou "root" = raiz). Só mexe na D1. */
+folders.patch("/:id", async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const folder = await requireFolder(db, userId, c.req.param("id"));
+  const body = await readJsonObject(c);
+  const hasName = "name" in body;
+  const hasParent = "parentId" in body;
+  if (!hasName && !hasParent) {
+    throw new ApiError(400, "invalid_body", "Indique o novo nome e/ou a nova pasta.");
+  }
+
+  const name = hasName ? parseName(readString(body, "name")) : folder.name;
+  const parentId = hasParent ? parseFolderRef(body.parentId) : folder.parentId;
+  if (hasParent && parentId !== null) {
+    await requireFolder(db, userId, parentId);
+    if (await wouldCreateCycle(db, userId, folder.id, parentId)) {
+      throw new ApiError(
+        400,
+        "invalid_move",
+        "Não é possível mover uma pasta para dentro de si própria ou de uma das suas subpastas.",
+      );
+    }
+  }
+
+  try {
+    await db
+      .prepare(
+        "UPDATE folders SET name = ?1, name_norm = ?2, parent_id = ?3 WHERE id = ?4 AND user_id = ?5",
+      )
+      .bind(name, searchKey(name), parentId, folder.id, userId)
+      .run();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ApiError(409, "name_taken", "Já existe uma pasta com esse nome nesse local.");
+    }
+    throw error;
+  }
+  return c.json({ folder: { ...folder, name, parentId } });
+});
+
+/**
+ * Só apaga pastas vazias: sem subpastas e sem ficheiros fora da lixeira (um ficheiro `pending`
+ * conta como conteúdo). Os ficheiros que estão na lixeira passam para a raiz e a pasta desaparece.
+ */
+folders.delete("/:id", async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const folder = await requireFolder(db, userId, c.req.param("id"));
+  const notEmpty = new ApiError(
+    409,
+    "folder_not_empty",
+    "A pasta não está vazia. Mova ou exclua primeiro o conteúdo.",
+  );
+
+  const [subfolders, files] = await Promise.all([
+    db
+      .prepare("SELECT COUNT(*) AS n FROM folders WHERE user_id = ?1 AND parent_id = ?2")
+      .bind(userId, folder.id)
+      .first<{ n: number }>(),
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM files WHERE user_id = ?1 AND folder_id = ?2 AND deleted_at IS NULL",
+      )
+      .bind(userId, folder.id)
+      .first<{ n: number }>(),
+  ]);
+  if ((subfolders?.n ?? 0) > 0 || (files?.n ?? 0) > 0) throw notEmpty;
+
+  try {
+    await db.batch([
+      db
+        .prepare(
+          "UPDATE files SET folder_id = NULL WHERE user_id = ?1 AND folder_id = ?2 AND deleted_at IS NOT NULL",
+        )
+        .bind(userId, folder.id),
+      db.prepare("DELETE FROM folders WHERE id = ?1 AND user_id = ?2").bind(folder.id, userId),
+    ]);
+  } catch (error) {
+    // Alguém acrescentou conteúdo entre a verificação e o apagar: a chave estrangeira impede-o.
+    if (isForeignKeyViolation(error)) throw notEmpty;
+    throw error;
+  }
+  return c.body(null, 204);
 });
