@@ -4,6 +4,7 @@ import { ApiError } from "./errors";
 import { jsonBodyLimit } from "./middleware/body-limit";
 import { originCheck, securityHeaders } from "./middleware/security";
 import { auth } from "./routes/auth";
+import { folders } from "./routes/folders";
 import type { AppEnv } from "./types";
 
 export const app = new Hono<AppEnv>();
@@ -11,6 +12,7 @@ export const app = new Hono<AppEnv>();
 app.use("/api/*", securityHeaders);
 app.use("/api/*", originCheck);
 app.use("/api/auth/*", jsonBodyLimit);
+app.use("/api/folders/*", jsonBodyLimit);
 
 app.get("/api/health", async (c) => {
   const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
@@ -18,6 +20,7 @@ app.get("/api/health", async (c) => {
 });
 
 app.route("/api/auth", auth);
+app.route("/api/folders", folders);
 
 app.notFound((c) => c.json({ error: "not_found", message: "Não encontrado." }, 404));
 
