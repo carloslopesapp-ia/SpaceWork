@@ -183,7 +183,8 @@ Cada execução é idempotente e trabalha em lotes limitados, para respeitar os 
 ```
 wrangler.jsonc        bindings (DB, FILES), assets, cron, variáveis
 migrations/           SQL da D1 (0001_init.sql, …)
-scripts/              seed-master, setup-nosync
+scripts/              seed-master
+public/               _headers (cabeçalhos de segurança dos assets estáticos)
 src/worker/           Hono: index.ts, routes/ (auth, folders, files, trash, shares, public, search, admin), lib/ (crypto, session, quota, names), cron.ts
 src/web/              React: pages, components, api client
 src/shared/           tipos partilhados
@@ -193,8 +194,9 @@ docs/superpowers/     specs e planos
 
 ### Git e iCloud
 
-- A pasta do projeto está no iCloud Drive. `.git`, `node_modules`, `.wrangler` e `dist` ficam em pastas `*.nosync` com *symlink* (script `setup-nosync`), para o iCloud não os sincronizar (sincronizar o `.git` pode corromper o repositório).
-- `.gitignore`: `node_modules`, `node_modules.nosync`, `.wrangler`, `.wrangler.nosync`, `dist`, `dist.nosync`, `.dev.vars`, `.env*`, artefactos do Playwright.
+- A pasta do projeto está hoje no iCloud Drive. O `.git` está em `.git.nosync` com *symlink* (sincronizá-lo pode corromper o repositório).
+- **O truque `.nosync` não serve para `node_modules`** (verificado): o `npm install` do npm 11 substitui um `node_modules` que seja *symlink* por uma pasta real, e com o *symlink* o plugin de testes da Cloudflare deixa de reconhecer o Vitest como biblioteca externa e os testes rebentam. Por isso `node_modules`, `.wrangler` e `dist` ficam como pastas normais, e a recomendação é desenvolver **fora do iCloud** (ex.: `~/Developer/SpaceWork`; o GitHub é a cópia de segurança). Se a pasta ficar no iCloud, o `node_modules` (dezenas de milhares de ficheiros) é sincronizado: funciona, mas é lento e pode causar conflitos.
+- `.gitignore`: `.git.nosync`, `node_modules`, `.wrangler`, `dist`, `.dev.vars`, `.env*`, artefactos do Playwright.
 - Repositório local com ramo `main` e remoto `origin` = `https://github.com/carloslopesapp-ia/SpaceWork.git`. **Nenhum `git push` é feito sem confirmação explícita do utilizador.**
 
 ## 10. Testes
@@ -213,10 +215,19 @@ docs/superpowers/     specs e planos
 
 Recuperação de senha por email (e, por isso, o admin **não** consegue repor a senha de outro utilizador), confirmação de email, 2FA, criação de outros admins pela interface, uploads acima de 100 MB ou retomáveis, histórico de versões, partilha entre utilizadores, antivírus, paginação das listagens, vista em grelha, arrastar itens para mover, tema escuro, domínio próprio, deploy automático.
 
-## 13. Pontos a confirmar na implementação
+## 13. Factos verificados e pontos por confirmar
 
-1. Custo de CPU do PBKDF2 (100 000 iterações) face ao limite por pedido do plano gratuito do Workers. Se não couber, é preciso o plano pago.
-2. Limite exato de corpo de pedido do Workers por plano face a `MAX_UPLOAD_BYTES` (100 MiB), incluindo o comportamento do `put` no R2 com corpo em *stream* e `Content-Length` conhecido.
-3. Limites de chamadas por invocação do cron (dimensionar o tamanho dos lotes).
-4. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
-5. Comportamento transacional e mensagens de erro de violação de unicidade nas *batches* da D1.
+### Verificados (2026-10-03, documentação oficial e ensaio local)
+
+- **Ferramentas:** o pacote de testes chama-se `@cloudflare/vitest-plugin` (antes `vitest-pool-workers`) e exige **Vitest 4.1.x** (não o 5). Vite 8, TypeScript 7, React Router 8, Tailwind 4 e `@cloudflare/vite-plugin` 1.x funcionam em conjunto (build, `vite dev`, `tsc -b`, testes).
+- **Limites do Workers:** corpo de pedido de 100 MB nos planos Free e Pro; 50 subpedidos por invocação no Free e 10 000 no Pago; as chamadas a D1 e R2 contam como subpedidos; CPU por pedido de 10 ms no Free e 30 s por defeito no Pago.
+- **R2:** `put` com *stream* só aceita corpos de comprimento conhecido (`request.body` com `Content-Length`); `delete` aceita até 1000 chaves por chamada.
+- **D1:** `batch()` é transacional (falha de uma instrução reverte tudo); uma violação de unicidade produz uma mensagem que contém `UNIQUE constraint failed`; as chaves estrangeiras estão ativas.
+- **Assets e rotas:** com `not_found_handling: "single-page-application"`, um pedido de **navegação** (por exemplo, um link de descarga) seria servido como `index.html` sem passar pelo Worker. É por isso obrigatório `run_worker_first: ["/api/*"]` em `wrangler.jsonc`.
+- **Local:** `wrangler d1 ... --local` e `vite dev` partilham a mesma base de dados local.
+
+### Por confirmar em produção
+
+1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. Não é medível em local. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês). O valor de 100 000 como teto de iterações do WebCrypto do Workers também só se confirma em produção.
+2. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
+3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação).

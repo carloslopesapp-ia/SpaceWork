@@ -1,11 +1,10 @@
-# iCloud: pastas fora da sincronização (ver docs/superpowers/specs, secção 9)
+# iCloud: o .git vive em .git.nosync (com symlink .git) para o iCloud não o sincronizar
 .git.nosync/
+
+# Dependências e artefactos gerados
 node_modules
-node_modules.nosync/
 .wrangler
-.wrangler.nosync/
 dist
-dist.nosync/
 
 # Segredos e configuração local
 .dev.vars
