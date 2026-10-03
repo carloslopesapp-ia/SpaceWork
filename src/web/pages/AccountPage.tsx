@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { isValidPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../shared/validation";
 import { useChangePassword, useMe } from "../auth";
 import { Button } from "../components/Button";
 import { Message } from "../components/Message";
@@ -16,8 +17,8 @@ export default function AccountPage() {
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     setDone(false);
-    if (newPassword.length < 8 || newPassword.length > 128) {
-      setLocalError("A senha nova deve ter entre 8 e 128 caracteres.");
+    if (!isValidPassword(newPassword)) {
+      setLocalError(`A senha nova deve ter entre ${PASSWORD_MIN_LENGTH} e ${PASSWORD_MAX_LENGTH} caracteres.`);
       return;
     }
     if (newPassword !== confirm) {

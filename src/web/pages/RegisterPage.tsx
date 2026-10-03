@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router";
+import { isValidPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../shared/validation";
 import { useMe, useRegister } from "../auth";
 import { AuthCard } from "../components/AuthCard";
 import { Button } from "../components/Button";
@@ -18,8 +19,8 @@ export default function RegisterPage() {
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (password.length < 8 || password.length > 128) {
-      setLocalError("A senha deve ter entre 8 e 128 caracteres.");
+    if (!isValidPassword(password)) {
+      setLocalError(`A senha deve ter entre ${PASSWORD_MIN_LENGTH} e ${PASSWORD_MAX_LENGTH} caracteres.`);
       return;
     }
     if (password !== confirm) {

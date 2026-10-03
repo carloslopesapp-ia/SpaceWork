@@ -12,7 +12,7 @@ import {
   isValidPassword,
   normalizeEmail,
   PASSWORD_MAX_LENGTH,
-} from "../lib/validation";
+} from "../../shared/validation";
 import { requireAuth } from "../middleware/auth";
 import type { AppEnv } from "../types";
 

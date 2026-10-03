@@ -5,7 +5,7 @@
 // A senha nunca é escrita em ficheiros nem passada ao wrangler: só o hash chega à base de dados.
 import { execFileSync } from "node:child_process";
 import { hashPassword } from "../src/worker/lib/crypto.ts";
-import { isValidEmail, isValidPassword, normalizeEmail } from "../src/worker/lib/validation.ts";
+import { isValidEmail, isValidPassword, normalizeEmail } from "../src/shared/validation.ts";
 
 const DEFAULT_MASTER_QUOTA_BYTES = 10 * 1024 ** 3;
 // Build child environment without MASTER_* variables (never pass them to wrangler).

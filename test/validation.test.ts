@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidEmail, isValidPassword, normalizeEmail } from "../src/worker/lib/validation";
+import { isValidEmail, isValidPassword, normalizeEmail } from "../src/shared/validation";
 
 describe("normalizeEmail", () => {
   it("remove espaços e passa para minúsculas", () => {
