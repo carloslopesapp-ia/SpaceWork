@@ -1,0 +1,19 @@
+# iCloud: pastas fora da sincronização (ver docs/superpowers/specs, secção 9)
+.git.nosync/
+node_modules
+node_modules.nosync/
+.wrangler
+.wrangler.nosync/
+dist
+dist.nosync/
+
+# Segredos e configuração local
+.dev.vars
+.env
+.env.*
+
+# Testes
+playwright-report/
+test-results/
+
+.DS_Store
