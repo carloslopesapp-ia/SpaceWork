@@ -30,7 +30,9 @@ describe("POST /api/folders", () => {
 
   it("normaliza o nome (NFC e sem espaços nas pontas)", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    const folder = await createFolder(cookie, "  Férias  ");
+    const input = "  Fe\u0301rias  "; // e + acento combinado (NFD), escrito com escape para o editor não o compor
+    expect(input).not.toBe(input.normalize("NFC")); // guarda: se alguém o compor, o teste deixa de provar a normalização
+    const folder = await createFolder(cookie, input);
     expect(folder.name).toBe("Férias");
   });
 

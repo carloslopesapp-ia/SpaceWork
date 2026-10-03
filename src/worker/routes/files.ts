@@ -103,7 +103,11 @@ files.put("/", async (c) => {
 /**
  * Desfaz a reserva de um upload que falhou: apaga a linha `pending` e devolve o espaço, numa só
  * `batch` (o `changes()` garante que o espaço só é devolvido se a linha foi mesmo apagada).
- * Se também isto falhar, a linha `pending` fica para o cron de manutenção limpar.
+ *
+ * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
+ * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
+ * se a `batch` falhou, a linha `pending` e o objeto ficam para o cron de manutenção (Plano 4) limpar.
+ * Falhas aqui são registadas e nunca substituem o erro original do upload.
  */
 async function releaseReservation(
   env: Env,
@@ -112,15 +116,21 @@ async function releaseReservation(
   size: number,
   r2Key: string,
 ): Promise<void> {
+  let removed = false;
   try {
-    await env.DB.batch([
+    const [deleted] = await env.DB.batch([
       env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
       env.DB.prepare(
         "UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0) WHERE id = ?2 AND changes() = 1",
       ).bind(size, userId),
     ]);
+    removed = deleted.meta.changes === 1;
   } catch (error) {
     console.error("Não foi possível libertar a reserva de um upload falhado", error);
   }
-  await env.FILES.delete(r2Key).catch(() => undefined);
+  // O objeto só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready`, o objeto é o
+  // conteúdo do ficheiro; se a batch falhou, o cron de manutenção (Plano 4) limpa a linha e o objeto.
+  if (removed) {
+    await env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
+  }
 }
