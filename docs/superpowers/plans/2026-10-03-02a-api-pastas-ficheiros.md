@@ -716,7 +716,9 @@ describe("POST /api/folders", () => {
 
   it("normaliza o nome (NFC e sem espaços nas pontas)", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    const folder = await createFolder(cookie, "  Férias  ");
+    const input = "  Fe\u0301rias  "; // e + acento combinado (NFD), escrito com escape para o editor não o compor
+    expect(input).not.toBe(input.normalize("NFC")); // guarda: se alguém o compor, o teste deixa de provar a normalização
+    const folder = await createFolder(cookie, input);
     expect(folder.name).toBe("Férias");
   });
 
@@ -1765,7 +1767,7 @@ Criar `test/files-upload.test.ts`:
 
 ```ts
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/worker/app";
 import { registerUser } from "./auth-helpers";
 import { countFiles, setQuota, uploadFile, uploadOk, usedBytes } from "./file-helpers";
@@ -1773,6 +1775,54 @@ import { createFolder, getContents } from "./folder-helpers";
 import { ORIGIN, api, resetState } from "./helpers";
 
 beforeEach(resetState);
+afterEach(() => vi.restoreAllMocks());
+
+// Chama a app diretamente com bindings/variáveis alterados. Aqui o Content-Length tem de ser posto à mão
+// (`lengthHeader: null` omite-o).
+function rawUpload(
+  name: string,
+  body: Uint8Array,
+  cookie: string,
+  override: Record<string, unknown>,
+  lengthHeader: string | null = String(body.length),
+) {
+  const request = new Request(`${ORIGIN}/api/files?name=${name}`, {
+    method: "PUT",
+    body,
+    headers: {
+      Origin: ORIGIN,
+      Cookie: cookie,
+      "Content-Type": "application/octet-stream",
+      ...(lengthHeader === null ? {} : { "Content-Length": lengthHeader }),
+    },
+  });
+  return app.fetch(request, { ...env, ...override } as Env);
+}
+
+/**
+ * `DB` em Proxy: tudo vai para `env.DB`, menos `batch`, que passa por `onBatch` com o número da chamada
+ * (1.ª = reserva do upload, 2.ª = libertação da reserva) e uma função que corre a `batch` real.
+ * A autenticação e as pastas usam `prepare`, por isso não contam como `batch`.
+ */
+function dbWithBatchHook(
+  onBatch: (call: number, runReal: () => Promise<D1Result[]>) => Promise<D1Result[]>,
+): D1Database {
+  let calls = 0;
+  return new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop === "batch") {
+        return (statements: D1PreparedStatement[]) => onBatch(++calls, () => target.batch(statements));
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/** Silencia (e deixa inspecionar) o `console.error` que a app usa para registar falhas. */
+function silenceErrors() {
+  return vi.spyOn(console, "error").mockImplementation(() => undefined);
+}
 
 describe("PUT /api/files (upload)", () => {
   it("grava o ficheiro no R2 e na D1 e devolve-o", async () => {
@@ -1822,7 +1872,9 @@ describe("PUT /api/files (upload)", () => {
 
   it("normaliza o nome e recusa nomes inválidos (400)", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    expect((await uploadOk(cookie, "  Relatório.pdf ", "x")).name).toBe("Relatório.pdf");
+    const input = "  Relato\u0301rio.pdf "; // o + acento combinado (NFD), escrito com escape para o editor não o compor
+    expect(input).not.toBe(input.normalize("NFC")); // guarda: se alguém o compor, o teste deixa de provar a normalização
+    expect((await uploadOk(cookie, input, "x")).name).toBe("Relatório.pdf");
     for (const name of ["", "a/b", "..", "a".repeat(256)]) {
       const res = await uploadFile(cookie, name, "x");
       expect(res.status, JSON.stringify(name)).toBe(400);
@@ -1898,39 +1950,27 @@ describe("quota", () => {
     expect(await countFiles()).toBe(3);
   });
 
-  it("uma conta suspensa não consegue reservar espaço", async () => {
+  it("uma conta suspensa entre a autenticação e a reserva não consegue reservar espaço", async () => {
     const { cookie, user } = await registerUser("ana@example.com");
-    // A sessão deixa de valer ao suspender; este caso cobre a condição `status = 'active'` da reserva.
-    await env.DB.prepare("UPDATE users SET status = 'suspended' WHERE id = ?1").bind(user.id).run();
-    const res = await uploadFile(cookie, "a.txt", "x");
-    expect(res.status).toBe(401);
+    // O `requireAuth` já passou quando a `batch` da reserva corre: a conta é suspensa exatamente aí, para
+    // exercitar a condição `status = 'active'` do INSERT (suspensa antes do pedido, seria recusada com 401).
+    const racingDb = dbWithBatchHook(async (_call, runReal) => {
+      await env.DB.prepare("UPDATE users SET status = 'suspended' WHERE id = ?1").bind(user.id).run();
+      return runReal();
+    });
+    const res = await rawUpload("a.txt", new Uint8Array(1), cookie, { DB: racingDb });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: "quota_exceeded" });
     expect(await countFiles()).toBe(0);
+    // A sessão deixou de valer: confirma-se com SQL direto.
+    const row = await env.DB.prepare("SELECT status, used_bytes FROM users WHERE id = ?1")
+      .bind(user.id)
+      .first<{ status: string; used_bytes: number }>();
+    expect(row).toEqual({ status: "suspended", used_bytes: 0 });
   });
 });
 
 describe("limites e falhas", () => {
-  // Chama a app diretamente com bindings/variáveis alterados. Aqui o Content-Length tem de ser posto à mão
-  // (`lengthHeader: null` omite-o).
-  function rawUpload(
-    name: string,
-    body: Uint8Array,
-    cookie: string,
-    override: Record<string, unknown>,
-    lengthHeader: string | null = String(body.length),
-  ) {
-    const request = new Request(`${ORIGIN}/api/files?name=${name}`, {
-      method: "PUT",
-      body,
-      headers: {
-        Origin: ORIGIN,
-        Cookie: cookie,
-        "Content-Type": "application/octet-stream",
-        ...(lengthHeader === null ? {} : { "Content-Length": lengthHeader }),
-      },
-    });
-    return app.fetch(request, { ...env, ...override } as Env);
-  }
-
   it("recusa com 413 file_too_large um ficheiro acima de MAX_UPLOAD_BYTES", async () => {
     const { cookie } = await registerUser("ana@example.com");
     const res = await rawUpload("g.bin", new Uint8Array(11), cookie, { MAX_UPLOAD_BYTES: "10" });
@@ -1980,6 +2020,92 @@ describe("limites e falhas", () => {
     expect(await usedBytes(cookie)).toBe(0);
   });
 
+  it("se o R2 confirmar a gravação (linha ready) mas a resposta se perder, não apaga o objeto nem devolve o espaço", async () => {
+    silenceErrors();
+    const { cookie } = await registerUser("ana@example.com");
+    const deleted: string[] = [];
+    // Simula "confirmado mas resposta perdida": a linha já é `ready` quando o `put` lança.
+    const lostResponseR2 = {
+      put: async (key: string) => {
+        await env.DB.prepare("UPDATE files SET status = 'ready' WHERE r2_key = ?1").bind(key).run();
+        throw new Error("resposta perdida");
+      },
+      delete: async (key: string) => {
+        deleted.push(key);
+      },
+    };
+    const res = await rawUpload("a.bin", new Uint8Array(7), cookie, { FILES: lostResponseR2 as unknown as R2Bucket });
+    expect(res.status).toBe(500);
+    const row = await env.DB.prepare("SELECT status FROM files").first<{ status: string }>();
+    expect(row?.status).toBe("ready");
+    expect(await countFiles()).toBe(1);
+    expect(await usedBytes(cookie)).toBe(7); // o espaço continua reservado: o ficheiro existe
+    expect(deleted).toEqual([]); // o objeto é o conteúdo do ficheiro: não se apaga
+  });
+
+  it("se a libertação da reserva também falhar, o erro original chega ao cliente e nada é apagado", async () => {
+    const errors = silenceErrors();
+    const { cookie } = await registerUser("ana@example.com");
+    const deleted: string[] = [];
+    const brokenR2 = {
+      put: async () => {
+        throw new Error("r2 em baixo");
+      },
+      delete: async (key: string) => {
+        deleted.push(key);
+      },
+    };
+    // 1.ª batch = reserva (real); 2.ª = libertação (falha).
+    const db = dbWithBatchHook((call, runReal) => (call === 2 ? Promise.reject(new Error("d1 em baixo")) : runReal()));
+    const res = await rawUpload("a.bin", new Uint8Array(7), cookie, {
+      DB: db,
+      FILES: brokenR2 as unknown as R2Bucket,
+    });
+    expect(res.status).toBe(500);
+    expect(errors).toHaveBeenCalledWith(new Error("r2 em baixo")); // o erro original, não o da libertação
+    const row = await env.DB.prepare("SELECT status FROM files").first<{ status: string }>();
+    expect(row?.status).toBe("pending"); // fica para o cron de manutenção
+    expect(await countFiles()).toBe(1);
+    expect(await usedBytes(cookie)).toBe(7);
+    // Sem a linha apagada não há garantia de que o objeto seja órfão: não se mexe nele.
+    expect(deleted).toEqual([]);
+  });
+
+  it("se o delete do R2 também falhar, liberta na mesma a reserva, regista o objeto órfão e devolve o erro original", async () => {
+    const errors = silenceErrors();
+    const { cookie } = await registerUser("ana@example.com");
+    const deleted: string[] = [];
+    const brokenR2 = {
+      put: async () => {
+        throw new Error("r2 em baixo");
+      },
+      delete: async (key: string) => {
+        deleted.push(key);
+        throw new Error("delete em baixo");
+      },
+    };
+    const res = await rawUpload("a.bin", new Uint8Array(7), cookie, { FILES: brokenR2 as unknown as R2Bucket });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "internal_error" });
+    expect(await countFiles()).toBe(0);
+    expect(await usedBytes(cookie)).toBe(0);
+    expect(deleted).toHaveLength(1);
+    expect(errors).toHaveBeenCalledWith(new Error("r2 em baixo"));
+    expect(errors).toHaveBeenCalledWith(`Objeto órfão no R2: ${deleted[0]}`, new Error("delete em baixo"));
+  });
+
+  it("dois uploads em paralelo com o mesmo nome: um fica (201), o outro é recusado (409) e só um ocupa quota", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const results = await Promise.all([
+      uploadFile(cookie, "mesmo.bin", new Uint8Array(30)),
+      uploadFile(cookie, "mesmo.bin", new Uint8Array(30)),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(await usedBytes(cookie)).toBe(30);
+    expect(await countFiles()).toBe(1);
+    expect((await env.FILES.list({ prefix: "u/" })).objects).toHaveLength(1);
+  });
+
   it("uploads pending (a meio) não aparecem nas listagens", async () => {
     const { cookie, user } = await registerUser("ana@example.com");
     await env.DB.prepare(
@@ -1991,10 +2117,46 @@ describe("limites e falhas", () => {
     expect((await getContents(cookie)).files).toEqual([]);
   });
 });
+
+describe("listagem de ficheiros", () => {
+  it("ordena por nome sem acentos nem maiúsculas, seja qual for a ordem de inserção", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    for (const name of ["Zeta.txt", "álbum.txt", "Beta.txt", "acordo.txt"]) await uploadOk(cookie, name, "x");
+    expect((await getContents(cookie)).files.map((f) => f.name)).toEqual([
+      "acordo.txt",
+      "álbum.txt",
+      "Beta.txt",
+      "Zeta.txt",
+    ]);
+  });
+
+  it("isola os utilizadores: não vê ficheiros alheios, o mesmo nome pode existir nos dois e a quota é de cada um", async () => {
+    const ana = await registerUser("ana@example.com");
+    const bob = await registerUser("bob@example.com");
+    const daAna = await uploadOk(ana.cookie, "a.txt", "12345");
+    expect((await getContents(bob.cookie)).files).toEqual([]);
+    expect(await usedBytes(bob.cookie)).toBe(0);
+
+    const doBob = await uploadOk(bob.cookie, "a.txt", "123"); // mesmo nome: permitido
+    expect(doBob.id).not.toBe(daAna.id);
+    expect((await getContents(ana.cookie)).files.map((f) => [f.id, f.size])).toEqual([[daAna.id, 5]]);
+    expect((await getContents(bob.cookie)).files.map((f) => [f.id, f.size])).toEqual([[doBob.id, 3]]);
+    expect(await usedBytes(ana.cookie)).toBe(5);
+    expect(await usedBytes(bob.cookie)).toBe(3);
+  });
+
+  it("não lista ficheiros com deleted_at definido", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const apagado = await uploadOk(cookie, "apagado.txt", "x");
+    await uploadOk(cookie, "visivel.txt", "x");
+    await env.DB.prepare("UPDATE files SET deleted_at = ?1 WHERE id = ?2").bind(Date.now(), apagado.id).run();
+    expect((await getContents(cookie)).files.map((f) => f.name)).toEqual(["visivel.txt"]);
+  });
+});
 ```
 
 Run: `npx vitest run test/files-upload.test.ts`
-Expected: FAIL (Test Files  1 failed (1); Tests  16 failed | 1 passed (17)).
+Expected: FAIL (Test Files  1 failed (1); Tests  23 failed | 1 passed (24)).
 
 - [ ] **Step 2: Implementar o upload**
 
@@ -2148,7 +2310,11 @@ files.put("/", async (c) => {
 /**
  * Desfaz a reserva de um upload que falhou: apaga a linha `pending` e devolve o espaço, numa só
  * `batch` (o `changes()` garante que o espaço só é devolvido se a linha foi mesmo apagada).
- * Se também isto falhar, a linha `pending` fica para o cron de manutenção limpar.
+ *
+ * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
+ * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
+ * se a `batch` falhou, a linha `pending` e o objeto ficam para o cron de manutenção (Plano 4) limpar.
+ * Falhas aqui são registadas e nunca substituem o erro original do upload.
  */
 async function releaseReservation(
   env: Env,
@@ -2157,17 +2323,23 @@ async function releaseReservation(
   size: number,
   r2Key: string,
 ): Promise<void> {
+  let removed = false;
   try {
-    await env.DB.batch([
+    const [deleted] = await env.DB.batch([
       env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
       env.DB.prepare(
         "UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0) WHERE id = ?2 AND changes() = 1",
       ).bind(size, userId),
     ]);
+    removed = deleted.meta.changes === 1;
   } catch (error) {
     console.error("Não foi possível libertar a reserva de um upload falhado", error);
   }
-  await env.FILES.delete(r2Key).catch(() => undefined);
+  // O objeto só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready`, o objeto é o
+  // conteúdo do ficheiro; se a batch falhou, o cron de manutenção (Plano 4) limpa a linha e o objeto.
+  if (removed) {
+    await env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
+  }
 }
 ```
 
@@ -2217,10 +2389,10 @@ app.onError((error, c) => {
 - [ ] **Step 3: Correr tudo**
 
 Run: `npx vitest run test/files-upload.test.ts`
-Expected: `Test Files  1 passed (1)`, `Tests  17 passed (17)`.
+Expected: `Test Files  1 passed (1)`, `Tests  24 passed (24)`.
 
 Run: `npx vitest run`
-Expected: `Test Files  17 passed (17)`, `Tests  129 passed (129)`.
+Expected: `Test Files  17 passed (17)`, `Tests  136 passed (136)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2674,7 +2846,11 @@ files.put("/", async (c) => {
 /**
  * Desfaz a reserva de um upload que falhou: apaga a linha `pending` e devolve o espaço, numa só
  * `batch` (o `changes()` garante que o espaço só é devolvido se a linha foi mesmo apagada).
- * Se também isto falhar, a linha `pending` fica para o cron de manutenção limpar.
+ *
+ * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
+ * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
+ * se a `batch` falhou, a linha `pending` e o objeto ficam para o cron de manutenção (Plano 4) limpar.
+ * Falhas aqui são registadas e nunca substituem o erro original do upload.
  */
 async function releaseReservation(
   env: Env,
@@ -2683,17 +2859,23 @@ async function releaseReservation(
   size: number,
   r2Key: string,
 ): Promise<void> {
+  let removed = false;
   try {
-    await env.DB.batch([
+    const [deleted] = await env.DB.batch([
       env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
       env.DB.prepare(
         "UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0) WHERE id = ?2 AND changes() = 1",
       ).bind(size, userId),
     ]);
+    removed = deleted.meta.changes === 1;
   } catch (error) {
     console.error("Não foi possível libertar a reserva de um upload falhado", error);
   }
-  await env.FILES.delete(r2Key).catch(() => undefined);
+  // O objeto só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready`, o objeto é o
+  // conteúdo do ficheiro; se a batch falhou, o cron de manutenção (Plano 4) limpa a linha e o objeto.
+  if (removed) {
+    await env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
+  }
 }
 
 function missingObject(fileId: string): ApiError {
@@ -2775,7 +2957,7 @@ Run: `npx vitest run test/files-download.test.ts`
 Expected: `Test Files  1 passed (1)`, `Tests  16 passed (16)`.
 
 Run: `npx vitest run`
-Expected: `Test Files  18 passed (18)`, `Tests  145 passed (145)`.
+Expected: `Test Files  18 passed (18)`, `Tests  152 passed (152)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3236,7 +3418,11 @@ files.put("/", async (c) => {
 /**
  * Desfaz a reserva de um upload que falhou: apaga a linha `pending` e devolve o espaço, numa só
  * `batch` (o `changes()` garante que o espaço só é devolvido se a linha foi mesmo apagada).
- * Se também isto falhar, a linha `pending` fica para o cron de manutenção limpar.
+ *
+ * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
+ * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
+ * se a `batch` falhou, a linha `pending` e o objeto ficam para o cron de manutenção (Plano 4) limpar.
+ * Falhas aqui são registadas e nunca substituem o erro original do upload.
  */
 async function releaseReservation(
   env: Env,
@@ -3245,17 +3431,23 @@ async function releaseReservation(
   size: number,
   r2Key: string,
 ): Promise<void> {
+  let removed = false;
   try {
-    await env.DB.batch([
+    const [deleted] = await env.DB.batch([
       env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
       env.DB.prepare(
         "UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0) WHERE id = ?2 AND changes() = 1",
       ).bind(size, userId),
     ]);
+    removed = deleted.meta.changes === 1;
   } catch (error) {
     console.error("Não foi possível libertar a reserva de um upload falhado", error);
   }
-  await env.FILES.delete(r2Key).catch(() => undefined);
+  // O objeto só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready`, o objeto é o
+  // conteúdo do ficheiro; se a batch falhou, o cron de manutenção (Plano 4) limpa a linha e o objeto.
+  if (removed) {
+    await env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
+  }
 }
 
 function missingObject(fileId: string): ApiError {
@@ -3394,7 +3586,7 @@ Run: `npx vitest run test/files-manage.test.ts test/authz.test.ts`
 Expected: `Test Files  2 passed (2)`, `Tests  12 passed (12)`.
 
 Run: `npx vitest run`
-Expected: `Test Files  20 passed (20)`, `Tests  157 passed (157)`.
+Expected: `Test Files  20 passed (20)`, `Tests  164 passed (164)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3467,7 +3659,7 @@ por:
 - [ ] **Step 3: Verificação final**
 
 Run: `npx vitest run`
-Expected: `Test Files  20 passed (20)`, `Tests  157 passed (157)`.
+Expected: `Test Files  20 passed (20)`, `Tests  164 passed (164)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3505,4 +3697,8 @@ git commit -m "Documenta a API de pastas e ficheiros e regista o Plano 2A" -m "C
 
 **Fora deste plano:** a interface (Plano 2B); a lixeira (listar, restaurar, eliminar de vez, limpeza automática), a pesquisa e a partilha (Plano 3); o painel de administração e o cron (Plano 4); o deploy (Plano 5). Até ao Plano 3, os ficheiros excluídos continuam a ocupar quota.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Test Files 20 passed (20); Tests 157 passed (157).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Test Files 20 passed (20); Tests 164 passed (164).
+
+## Notas da execução
+
+- **Task 5 corrigida na revisão:** `releaseReservation` só apaga o objeto do R2 se a linha `pending` foi mesmo apagada (se a linha já está `ready` o objeto é o conteúdo do ficheiro) e regista a falha do `delete` em vez de a engolir; o teste da conta suspensa passou a exercitar a cláusula `status = 'active'` da reserva (simulando a suspensão entre a autenticação e a reserva); os literais NFD dos testes de normalização passaram a escapes `́` com guarda; e entraram os testes do caminho de falha e das listagens de ficheiros. O código e os testes desta secção do plano já refletem isso.
