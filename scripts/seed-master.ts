@@ -22,13 +22,25 @@ function parseTarget(args: string[]): "--local" | "--remote" {
   return flags[0] as "--local" | "--remote";
 }
 
-function d1Execute(target: string, sql: string): Array<{ results: unknown[] }> {
-  const stdout = execFileSync(
-    "npx",
-    ["wrangler", "d1", "execute", "DB", target, "--json", "--command", sql],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], env: childEnv },
-  );
-  return JSON.parse(stdout.slice(stdout.indexOf("[")));
+function d1Execute(target: string, sql: string): Array<{ results: Array<Record<string, unknown>> }> {
+  let stdout: string;
+  try {
+    stdout = execFileSync(
+      "npx",
+      ["wrangler", "d1", "execute", "DB", target, "--json", "--command", sql],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], env: childEnv },
+    );
+  } catch {
+    // Não imprime a exceção: o stack trace traria a linha de comando completa, com o email e o hash.
+    // O stderr do wrangler já foi para o terminal (stdio: inherit).
+    fail(
+      `O wrangler falhou ao executar a consulta (destino: ${target.slice(2)}). ` +
+        "Se a base for nova, aplique primeiro as migrações (npm run db:migrate:local).",
+    );
+  }
+  const start = stdout.indexOf("[");
+  if (start === -1) fail("Resposta inesperada do wrangler.");
+  return JSON.parse(stdout.slice(start));
 }
 
 const target = parseTarget(process.argv.slice(2));
@@ -49,8 +61,14 @@ if (process.env.MASTER_QUOTA_BYTES) {
 if (!isValidEmail(email) || email.includes("'")) fail("MASTER_EMAIL em falta ou inválido.");
 if (!isValidPassword(password)) fail("MASTER_PASSWORD em falta (tem de ter entre 8 e 128 caracteres).");
 
-const existing = d1Execute(target, `SELECT id FROM users WHERE email = '${email}'`);
-if (existing[0]?.results.length) {
+const existing = d1Execute(target, `SELECT id, role FROM users WHERE email = '${email}'`)[0]?.results[0];
+if (existing) {
+  if (existing.role !== "admin") {
+    fail(
+      "O email já está registado como utilizador normal (role = user). " +
+        "O seed não altera contas existentes: use outro email ou resolva essa conta manualmente.",
+    );
+  }
   console.log("O utilizador master já existe. Nada foi alterado.");
   process.exit(0);
 }
