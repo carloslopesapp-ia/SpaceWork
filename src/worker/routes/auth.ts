@@ -1,9 +1,10 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { getConfig } from "../config";
 import { ApiError, isUniqueViolation } from "../errors";
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from "../lib/cookies";
 import { hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
+import { readJsonObject, readString } from "../lib/http";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
 import { createSession, deleteSessionByHash, deleteUserSessions } from "../lib/sessions";
 import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
@@ -17,19 +18,6 @@ import { requireAuth } from "../middleware/auth";
 import type { AppEnv } from "../types";
 
 export const auth = new Hono<AppEnv>();
-
-async function readBody(c: Context<AppEnv>): Promise<Record<string, unknown>> {
-  const body: unknown = await c.req.json().catch(() => null);
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new ApiError(400, "invalid_body", "Corpo do pedido inválido.");
-  }
-  return body as Record<string, unknown>;
-}
-
-function readString(body: Record<string, unknown>, key: string): string {
-  const value = body[key];
-  return typeof value === "string" ? value : "";
-}
 
 const INVALID_CREDENTIALS = ["invalid_credentials", "Email ou senha inválidos."] as const;
 const LOCKED_OUT = [
@@ -45,7 +33,7 @@ function getDummyHash(): Promise<string> {
 }
 
 auth.post("/register", async (c) => {
-  const body = await readBody(c);
+  const body = await readJsonObject(c);
   const email = normalizeEmail(readString(body, "email"));
   const password = readString(body, "password");
   if (!isValidEmail(email)) throw new ApiError(400, "invalid_email", "Email inválido.");
@@ -84,7 +72,7 @@ auth.post("/register", async (c) => {
 });
 
 auth.post("/login", async (c) => {
-  const body = await readBody(c);
+  const body = await readJsonObject(c);
   const email = normalizeEmail(readString(body, "email"));
   const password = readString(body, "password");
   const db = c.env.DB;
@@ -138,7 +126,7 @@ auth.get("/me", requireAuth, (c) => {
 
 auth.post("/password", requireAuth, async (c) => {
   const user = c.get("user");
-  const body = await readBody(c);
+  const body = await readJsonObject(c);
   const currentPassword = readString(body, "currentPassword");
   const newPassword = readString(body, "newPassword");
   if (!isValidPassword(newPassword)) {

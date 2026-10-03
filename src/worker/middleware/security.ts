@@ -9,6 +9,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "SAMEORIGIN");
   c.header("Referrer-Policy", "same-origin");
+  c.header("Cache-Control", "no-store");
 };
 
 /** Proteção CSRF: pedidos que alteram dados têm de trazer um Origin igual à origem do pedido. */
