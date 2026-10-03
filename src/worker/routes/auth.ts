@@ -3,7 +3,7 @@ import { getConfig } from "../config";
 import { ApiError, isUniqueViolation } from "../errors";
 import { setSessionCookie } from "../lib/cookies";
 import { hashPassword, verifyPassword } from "../lib/crypto";
-import { clearFailures, isLockedOut, recordFailure } from "../lib/login-limit";
+import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
 import { createSession } from "../lib/sessions";
 import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
 import { isValidEmail, isValidPassword, normalizeEmail } from "../lib/validation";
@@ -83,7 +83,8 @@ auth.post("/login", async (c) => {
   const password = readString(body, "password");
   const db = c.env.DB;
 
-  if (await isLockedOut(db, email)) throw new ApiError(429, ...LOCKED_OUT);
+  // A tentativa fica registada antes de verificar a senha: assim pedidos em paralelo não escapam ao limite.
+  if (!(await tryRecordAttempt(db, email))) throw new ApiError(429, ...LOCKED_OUT);
 
   const row = await db
     .prepare(
@@ -98,15 +99,14 @@ auth.post("/login", async (c) => {
     password,
     usable ? row.password_hash : await getDummyHash(),
   );
-  if (!usable || !passwordOk) {
-    await recordFailure(db, email);
-    throw new ApiError(401, ...INVALID_CREDENTIALS);
-  }
+  if (!usable || !passwordOk) throw new ApiError(401, ...INVALID_CREDENTIALS);
+
+  // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja suspensa.
+  await clearFailures(db, email);
   if (row.status === "suspended") {
     throw new ApiError(403, "account_suspended", "Conta suspensa. Contacte o administrador.");
   }
 
-  await clearFailures(db, email);
   const config = getConfig(c.env);
   const { token } = await createSession(db, row.id, config.sessionTtlDays);
   setSessionCookie(c, token, config.sessionTtlDays);

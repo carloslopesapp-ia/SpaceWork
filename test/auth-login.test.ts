@@ -73,4 +73,35 @@ describe("POST /api/auth/login", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ error: "invalid_credentials" });
   });
+
+  it("não deixa pedidos em paralelo ultrapassar o limite de 5 tentativas", async () => {
+    await registerUser("ana@example.com", "senha-segura-123");
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => login("ana@example.com", `errada-errada-${i}`)),
+    );
+    const statuses = responses.map((res) => res.status);
+    expect(statuses.filter((status) => status === 401)).toHaveLength(5);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(3);
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first<{
+      n: number;
+    }>();
+    expect(row?.n).toBe(5);
+  });
+
+  it("bloqueia também um email inexistente, para o 429 não revelar se o email existe", async () => {
+    for (let i = 0; i < 5; i++) {
+      expect((await login("ninguem@example.com", "errada-errada")).status).toBe(401);
+    }
+    const blocked = await login("ninguem@example.com", "errada-errada");
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toMatchObject({ error: "too_many_attempts" });
+  });
+
+  it("o bloqueio de um email não afeta outro", async () => {
+    await registerUser("ana@example.com", "senha-segura-123");
+    await registerUser("bob@example.com", "outra-senha-123");
+    for (let i = 0; i < 5; i++) await login("ana@example.com", "errada-errada");
+    expect((await login("ana@example.com", "senha-segura-123")).status).toBe(429);
+    expect((await login("bob@example.com", "outra-senha-123")).status).toBe(200);
+  });
 });
