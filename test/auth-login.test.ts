@@ -97,6 +97,35 @@ describe("POST /api/auth/login", () => {
     expect(await blocked.json()).toMatchObject({ error: "too_many_attempts" });
   });
 
+  async function countLoginFailures(): Promise<number | undefined> {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first<{
+      n: number;
+    }>();
+    return row?.n;
+  }
+
+  it("rejeita um email com mais de 254 caracteres sem o registar em login_failures", async () => {
+    const res = await login(`${"a".repeat(300)}@example.com`, "senha-segura-123");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "invalid_credentials" });
+    expect(await countLoginFailures()).toBe(0);
+  });
+
+  it("rejeita um email mal formado sem o registar em login_failures", async () => {
+    const res = await login("nao-e-email", "senha-segura-123");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "invalid_credentials" });
+    expect(await countLoginFailures()).toBe(0);
+  });
+
+  it("rejeita uma senha com mais de 128 caracteres sem registar a tentativa", async () => {
+    await registerUser("ana@example.com", "senha-segura-123");
+    const res = await login("ana@example.com", "a".repeat(129));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "invalid_credentials" });
+    expect(await countLoginFailures()).toBe(0);
+  });
+
   it("o bloqueio de um email não afeta outro", async () => {
     await registerUser("ana@example.com", "senha-segura-123");
     await registerUser("bob@example.com", "outra-senha-123");

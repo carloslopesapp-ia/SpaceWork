@@ -7,7 +7,12 @@ import { hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
 import { createSession, deleteSessionByHash, deleteUserSessions } from "../lib/sessions";
 import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
-import { isValidEmail, isValidPassword, normalizeEmail } from "../lib/validation";
+import {
+  isValidEmail,
+  isValidPassword,
+  normalizeEmail,
+  PASSWORD_MAX_LENGTH,
+} from "../lib/validation";
 import { requireAuth } from "../middleware/auth";
 import type { AppEnv } from "../types";
 
@@ -83,6 +88,12 @@ auth.post("/login", async (c) => {
   const email = normalizeEmail(readString(body, "email"));
   const password = readString(body, "password");
   const db = c.env.DB;
+
+  // Um email ou uma senha fora dos limites do registo nunca corresponde a uma conta: rejeita-se antes de
+  // registar a tentativa, para não gravar em login_failures texto de tamanho arbitrário.
+  if (!isValidEmail(email) || password.length > PASSWORD_MAX_LENGTH) {
+    throw new ApiError(401, ...INVALID_CREDENTIALS);
+  }
 
   // A tentativa fica registada antes de verificar a senha: assim pedidos em paralelo não escapam ao limite.
   if (!(await tryRecordAttempt(db, email))) throw new ApiError(429, ...LOCKED_OUT);
