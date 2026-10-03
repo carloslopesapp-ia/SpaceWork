@@ -83,7 +83,8 @@ const PREVIEW_TYPES: Record<string, string> = {
 export function previewContentType(name: string): string | null {
   const dot = name.lastIndexOf(".");
   if (dot <= 0) return null; // sem extensão, ou um ficheiro escondido como ".png"
-  return PREVIEW_TYPES[name.slice(dot + 1).toLowerCase()] ?? null;
+  const extension = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(PREVIEW_TYPES, extension) ? PREVIEW_TYPES[extension] : null;
 }
 
 /** `Content-Disposition` com `filename` ASCII de recurso e `filename*` em UTF-8 (RFC 5987). */

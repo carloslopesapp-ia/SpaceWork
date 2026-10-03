@@ -123,7 +123,7 @@ describe("GET /api/files/:id/preview", () => {
 
   it("recusa com 415 SVG, HTML, texto e nomes sem extensão", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    for (const name of ["a.svg", "b.html", "c.txt", "png", ".png", "d.png.exe"]) {
+    for (const name of ["a.svg", "b.html", "c.txt", "png", ".png", "d.png.exe", "e.constructor", "f.__proto__"]) {
       const file = await uploadOk(cookie, name, "x");
       const res = await api(`/api/files/${file.id}/preview`, { cookie });
       expect(res.status, name).toBe(415);
