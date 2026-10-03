@@ -2,7 +2,13 @@ import { formatBytes } from "../../shared/format";
 import { searchKey } from "../../shared/names";
 import { getConfig } from "../config";
 import { ApiError, isForeignKeyViolation, isUniqueViolation } from "../errors";
-import { r2KeyFor, sanitizeMime } from "../lib/files";
+import {
+  contentDisposition,
+  previewContentType,
+  r2KeyFor,
+  requireFile,
+  sanitizeMime,
+} from "../lib/files";
 import { parseFolderRef, requireFolder } from "../lib/folders";
 import { parseName } from "../lib/names";
 import { createAuthedRouter } from "./authed";
@@ -134,3 +140,75 @@ async function releaseReservation(
     await env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
   }
 }
+
+function missingObject(fileId: string): ApiError {
+  console.error(`O ficheiro ${fileId} existe na D1 mas não tem objeto no R2.`);
+  return new ApiError(404, "file_missing", "O conteúdo do ficheiro não está disponível.");
+}
+
+/** Descarrega o ficheiro em *stream*, sempre como anexo (nunca é interpretado pelo browser). */
+files.get("/:id/download", async (c) => {
+  const file = await requireFile(c.env.DB, c.get("user").id, c.req.param("id"));
+  const object = await c.env.FILES.get(file.r2Key);
+  if (!object) throw missingObject(file.id);
+
+  return new Response(object.body, {
+    headers: {
+      "Content-Type": file.mime,
+      "Content-Length": String(object.size),
+      "Content-Disposition": contentDisposition("attachment", file.name),
+      ETag: object.httpEtag,
+    },
+  });
+});
+
+/** Posição e tamanho de um intervalo já resolvido pelo R2. */
+function resolveRange(range: R2Range | undefined, size: number): { offset: number; length: number } {
+  const r = (range ?? {}) as { offset?: number; length?: number; suffix?: number };
+  const offset = r.offset ?? (r.suffix !== undefined ? Math.max(size - r.suffix, 0) : 0);
+  return { offset, length: r.length ?? size - offset };
+}
+
+/**
+ * Pré-visualização inline, só para imagens e PDF (lista fixa por extensão). O Content-Type vem
+ * dessa lista e não do valor guardado. Suporta um único intervalo (`Range: bytes=a-b`, `a-`, `-n`).
+ */
+files.get("/:id/preview", async (c) => {
+  const file = await requireFile(c.env.DB, c.get("user").id, c.req.param("id"));
+  const contentType = previewContentType(file.name);
+  if (!contentType) {
+    throw new ApiError(415, "preview_unsupported", "Este tipo de ficheiro não tem pré-visualização.");
+  }
+
+  // Só um intervalo simples conta; qualquer outro formato é ignorado e devolve-se o ficheiro todo.
+  const match = /^bytes=(\d*)-(\d*)$/.exec((c.req.header("range") ?? "").trim());
+  const ranged = match !== null && (match[1] !== "" || match[2] !== "");
+  const object = await c.env.FILES.get(file.r2Key, ranged ? { range: c.req.raw.headers } : undefined);
+  if (!object) throw missingObject(file.id);
+
+  const headers = new Headers({
+    "Content-Type": contentType,
+    "Content-Disposition": contentDisposition("inline", file.name),
+    "Accept-Ranges": "bytes",
+    ETag: object.httpEtag,
+  });
+  if (contentType.startsWith("image/")) {
+    headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
+  }
+
+  if (ranged && match) {
+    // O R2 devolve o ficheiro todo quando o intervalo começa depois do fim; aqui é 416.
+    if (match[1] !== "" && Number(match[1]) >= object.size) {
+      await object.body.cancel();
+      headers.set("Content-Range", `bytes */${object.size}`);
+      return new Response(null, { status: 416, headers });
+    }
+    const { offset, length } = resolveRange(object.range, object.size);
+    headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+    headers.set("Content-Length", String(length));
+    return new Response(object.body, { status: 206, headers });
+  }
+
+  headers.set("Content-Length", String(object.size));
+  return new Response(object.body, { headers });
+});
