@@ -1,0 +1,119 @@
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+import { registerUser, setUserStatus, type UserBody } from "./auth-helpers";
+import { api, resetDb } from "./helpers";
+
+beforeEach(resetDb);
+
+describe("POST /api/auth/register", () => {
+  it("cria o utilizador (role user, quota por defeito) e inicia sessão", async () => {
+    const res = await api("/api/auth/register", {
+      method: "POST",
+      json: { email: " Ana@Example.com ", password: "senha-segura-123" },
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as UserBody;
+    expect(body.user).toMatchObject({
+      email: "ana@example.com",
+      role: "user",
+      quotaBytes: 1_073_741_824,
+      usedBytes: 0,
+    });
+
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("sw_session=");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Lax");
+    expect(setCookie).toContain("Path=/");
+    expect(setCookie).toContain("Max-Age=1209600");
+    expect(setCookie).not.toContain("Secure");
+
+    const row = await env.DB.prepare("SELECT status, password_hash FROM users WHERE email = ?1")
+      .bind("ana@example.com")
+      .first<{ status: string; password_hash: string }>();
+    expect(row?.status).toBe("active");
+    expect(row?.password_hash.startsWith("pbkdf2-sha256$100000$")).toBe(true);
+  });
+
+  it("marca o cookie como Secure quando o pedido é HTTPS", async () => {
+    const res = await api("https://example.com/api/auth/register", {
+      method: "POST",
+      json: { email: "ana@example.com", password: "senha-segura-123" },
+      origin: "https://example.com",
+    });
+    expect(res.status).toBe(201);
+    expect(res.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("ignora qualquer role enviada no corpo", async () => {
+    const res = await api("/api/auth/register", {
+      method: "POST",
+      json: { email: "ana@example.com", password: "senha-segura-123", role: "admin" },
+    });
+    expect(((await res.json()) as UserBody).user.role).toBe("user");
+  });
+
+  it("devolve 409 para um email já registado, mesmo com maiúsculas", async () => {
+    await registerUser("ana@example.com");
+    const res = await api("/api/auth/register", {
+      method: "POST",
+      json: { email: "ANA@example.com", password: "outra-senha-123" },
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "email_taken" });
+  });
+
+  it("valida o email e a senha", async () => {
+    const badEmail = await api("/api/auth/register", {
+      method: "POST",
+      json: { email: "nao-e-email", password: "senha-segura-123" },
+    });
+    expect(badEmail.status).toBe(400);
+    expect(await badEmail.json()).toMatchObject({ error: "invalid_email" });
+
+    for (const password of ["curta", "x".repeat(129), 12345678]) {
+      const res = await api("/api/auth/register", {
+        method: "POST",
+        json: { email: "ana@example.com", password },
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_password" });
+    }
+  });
+
+  it("rejeita um corpo que não seja um objeto JSON", async () => {
+    const res = await api("/api/auth/register", {
+      method: "POST",
+      body: "isto não é json",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
+  });
+});
+
+describe("GET /api/auth/me", () => {
+  it("devolve o utilizador da sessão", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const res = await api("/api/auth/me", { cookie });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as UserBody).user.email).toBe("ana@example.com");
+  });
+
+  it("devolve 401 sem cookie ou com um cookie inventado", async () => {
+    expect((await api("/api/auth/me")).status).toBe(401);
+    expect((await api("/api/auth/me", { cookie: "sw_session=inventado" })).status).toBe(401);
+  });
+
+  it("devolve 401 quando a sessão expirou", async () => {
+    const { cookie } = await registerUser();
+    await env.DB.prepare("UPDATE sessions SET expires_at = 1").run();
+    expect((await api("/api/auth/me", { cookie })).status).toBe(401);
+  });
+
+  it("devolve 401 quando a conta foi suspensa depois do login", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    await setUserStatus("ana@example.com", "suspended");
+    expect((await api("/api/auth/me", { cookie })).status).toBe(401);
+  });
+});

@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { ApiError } from "./errors";
 import { originCheck, securityHeaders } from "./middleware/security";
+import { auth } from "./routes/auth";
+import type { AppEnv } from "./types";
 
-export const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<AppEnv>();
 
 app.use("/api/*", securityHeaders);
 app.use("/api/*", originCheck);
@@ -11,6 +13,8 @@ app.get("/api/health", async (c) => {
   const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
   return c.json({ ok: row?.ok === 1 });
 });
+
+app.route("/api/auth", auth);
 
 app.notFound((c) => c.json({ error: "not_found", message: "Não encontrado." }, 404));
 
