@@ -4,7 +4,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 
 | # | Plano | Entrega | Estado |
 |---|---|---|---|
-| 1 | [Fundação](2026-10-03-01-fundacao.md) | Projeto Cloudflare, esquema D1, autenticação completa (registo, login, logout, alterar senha), master, interface de login/registo/conta | Escrito |
+| 1 | [Fundação](2026-10-03-01-fundacao.md) | Projeto Cloudflare, esquema D1, autenticação completa (registo, login, logout, alterar senha), master, interface de login/registo/conta | Concluído |
 | 2 | Pastas e ficheiros | CRUD de pastas, upload com quota, descarregar, pré-visualizar, renomear, mover; ecrã "Meu espaço" | Por escrever |
 | 3 | Lixeira, pesquisa e partilha | Lixeira com restauro, pesquisa por nome, links públicos e página `/s/:token` | Por escrever |
 | 4 | Admin e manutenção | Painel de utilizadores e quotas, remoção de contas, cron de limpeza | Por escrever |
