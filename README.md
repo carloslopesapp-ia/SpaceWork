@@ -52,7 +52,7 @@ scripts/       seed-master
 src/worker/    API (Hono): rotas, lib, middleware
 src/web/       SPA React
 src/shared/    tipos e funções partilhadas
-test/          testes do Worker (os da interface ficam ao lado do código, em src/web/**/*.test.tsx)
+test/          testes do Worker (os da interface ficam ao lado do código, em src/web/**/*.test.{ts,tsx})
 ```
 
 ## API (pastas e ficheiros)
@@ -77,6 +77,6 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`). Em toda a AP
 
 ## Interface
 
-Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮» com pré-visualizar (imagens e PDF), descarregar, renomear, mover e excluir. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem). Até ao Plano 3 não há ecrã da lixeira: os ficheiros excluídos continuam a ocupar quota.
+Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮»: o das pastas tem renomear, mover e excluir; o dos ficheiros tem também pré-visualizar (imagens e PDF) e descarregar. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem). Até ao Plano 3 não há ecrã da lixeira: os ficheiros excluídos continuam a ocupar quota.
 
 Não fazer `git push` sem confirmação do dono do projeto.

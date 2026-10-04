@@ -25,7 +25,8 @@ function isFileBody(data: unknown): data is { file: FileItem } {
 /**
  * Envia um ficheiro para `PUT /api/files` com `XMLHttpRequest`: o `fetch` não dá o progresso do envio. O nome e a pasta
  * vão no URL, construído com `URLSearchParams` (o servidor decodifica `+` como espaço, por isso um nome com `+` tem de
- * ir como `%2B`). O browser acrescenta sozinho o `Content-Length` e o `Content-Type` (do `File`), que a API exige.
+ * ir como `%2B`). O browser acrescenta sozinho o `Content-Length` (que a API exige) e o `Content-Type` do `File`; sem
+ * `Content-Type` a API assume `application/octet-stream`.
  */
 export function uploadFile(
   file: File,
