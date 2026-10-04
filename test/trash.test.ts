@@ -135,9 +135,10 @@ describe("DELETE /api/trash/:id", () => {
 
   it("se o R2 falhar, a linha e a quota ficam certas e o objeto órfão fica registado", async () => {
     const errors = silenceErrors();
-    const { cookie } = await registerUser("ana@example.com");
+    const { cookie, user } = await registerUser("ana@example.com");
     const file = await uploadOk(cookie, "a.txt", "12345");
     await trashFile(cookie, file.id);
+    const r2Key = `u/${user.id}/${file.id}`;
     const brokenFiles = new Proxy(env.FILES, {
       get(target, prop) {
         if (prop === "delete") return () => Promise.reject(new Error("R2 em baixo"));
@@ -152,6 +153,8 @@ describe("DELETE /api/trash/:id", () => {
     expect(await usedBytes(cookie)).toBe(0);
     expect((await listTrash(cookie)).total).toBe(0);
     expect(errors).toHaveBeenCalled();
+    expect(errors.mock.calls.some((call) => String(call[0]).includes(r2Key))).toBe(true);
+    expect(await env.FILES.head(r2Key)).not.toBeNull();
   });
 });
 
