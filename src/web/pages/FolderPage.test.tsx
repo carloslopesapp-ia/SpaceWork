@@ -1,8 +1,8 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { FolderContents } from "../../shared/types";
-import { apiError, json, mockApi, SESSION } from "../test/mock-api";
+import { apiError, json, ME, mockApi, noContent, SESSION } from "../test/mock-api";
 import { renderApp } from "../test/render";
 
 const CREATED = new Date(2026, 9, 3, 12).getTime();
@@ -156,5 +156,49 @@ describe("FolderPage: nova pasta", () => {
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
     await user.click(screen.getByRole("button", { name: "Nova pasta" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("FolderPage: ações das linhas", () => {
+  it("renomear uma pasta atualiza a lista", async () => {
+    let name = "Fotos";
+    mockApi({
+      ...SESSION,
+      "GET /api/folders/:id/contents": () => json({ ...ROOT, folders: [{ ...ROOT.folders[0], name }] }),
+      "PATCH /api/folders/:id": ({ body }) => {
+        name = (body as { name: string }).name;
+        return json({ folder: { ...ROOT.folders[0], name } });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Ações para a pasta Fotos" }));
+    await user.click(screen.getByRole("menuitem", { name: "Renomear" }));
+    await user.clear(screen.getByLabelText("Nome da pasta"));
+    await user.type(screen.getByLabelText("Nome da pasta"), "Álbuns");
+    await user.click(screen.getByRole("button", { name: "Renomear" }));
+    expect(await screen.findByRole("link", { name: "Álbuns" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fotos" })).not.toBeInTheDocument();
+  });
+
+  it("excluir um ficheiro tira-o da lista e atualiza o espaço usado", async () => {
+    let deleted = false;
+    mockApi({
+      ...SESSION,
+      "GET /api/auth/me": () => json({ user: { ...ME, usedBytes: deleted ? 0 : 1536 } }),
+      "GET /api/folders/:id/contents": () => json(deleted ? { ...ROOT, files: [] } : ROOT),
+      "DELETE /api/files/:id": () => {
+        deleted = true;
+        return noContent();
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/");
+    expect(await screen.findByText("1,5 KB de 1 GB")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Ações para o ficheiro relatório.pdf" }));
+    await user.click(screen.getByRole("menuitem", { name: "Excluir" }));
+    await user.click(screen.getByRole("button", { name: "Excluir" }));
+    await waitFor(() => expect(screen.queryByText("relatório.pdf")).not.toBeInTheDocument());
+    expect(await screen.findByText("0 B de 1 GB")).toBeInTheDocument();
   });
 });

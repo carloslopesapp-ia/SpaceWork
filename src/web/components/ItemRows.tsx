@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { formatBytes, formatDate } from "../../shared/format";
 import type { FileItem, FolderItem } from "../../shared/types";
+import { FileActions } from "./FileActions";
+import { FolderActions } from "./FolderActions";
 import { FileIcon, FolderIcon } from "./icons";
 
 interface ItemRowProps {
@@ -36,6 +38,7 @@ export function FolderRow({ folder }: { folder: FolderItem }) {
       }
       size="—"
       date={formatDate(folder.createdAt)}
+      actions={<FolderActions folder={folder} />}
     />
   );
 }
@@ -51,6 +54,7 @@ export function FileRow({ file }: { file: FileItem }) {
       }
       size={formatBytes(file.size)}
       date={formatDate(file.createdAt)}
+      actions={<FileActions file={file} />}
     />
   );
 }
