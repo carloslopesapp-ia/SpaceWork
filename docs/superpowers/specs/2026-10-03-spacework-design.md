@@ -140,7 +140,7 @@ Uploads de um nome já existente na pasta devolvem 409 na v1; o utilizador pode 
 - **Eliminar definitivamente** (um ficheiro ou esvaziar a lixeira): apaga o objeto do R2, a linha da D1 e desconta o tamanho em `used_bytes`. O cron faz o mesmo aos itens com mais de `TRASH_RETENTION_DAYS`.
 - **Excluir pasta**: só se não tiver subpastas nem ficheiros com `deleted_at IS NULL` (incluindo `pending`). Caso contrário, 409. Se só tiver ficheiros na lixeira, a *batch* faz primeiro `folder_id = NULL` neles e depois apaga a pasta (a FK é a rede de segurança contra uploads concorrentes). A pasta apagada não vai para a lixeira.
 - **Listar**: devolve o conteúdo de uma pasta (pastas primeiro, depois ficheiros), por ordem de nome. Sem paginação na v1.
-- **Pesquisa**: `name_norm LIKE %q%`, com `%` e `_` escapados, mínimo 2 caracteres, máximo 50 resultados, só itens não apagados e `ready`. Cada resultado traz o caminho completo.
+- **Pesquisa**: pesquisa de substring em `name_norm` com `instr(name_norm, q) > 0`, mínimo 2 caracteres, máximo 100 caracteres na pesquisa, máximo 50 resultados, só itens não apagados e `ready`. Cada resultado traz o caminho completo. Não se usa `LIKE` porque a D1 limita os padrões a 50 bytes.
 
 ### Partilha por link
 
@@ -230,6 +230,7 @@ Recuperação de senha por email (e, por isso, o admin **não** consegue repor a
 - **D1:** `batch()` é transacional (falha de uma instrução reverte tudo); uma violação de unicidade produz uma mensagem que contém `UNIQUE constraint failed`; as chaves estrangeiras estão ativas.
 - **Assets e rotas:** com `not_found_handling: "single-page-application"`, um pedido de **navegação** (por exemplo, um link de descarga) seria servido como `index.html` sem passar pelo Worker. É por isso obrigatório `run_worker_first: ["/api/*"]` em `wrangler.jsonc`.
 - **Local:** `wrangler d1 ... --local` e `vite dev` partilham a mesma base de dados local.
+- **D1 (2026-10-04):** os padrões de `LIKE`/`GLOB` estão limitados a 50 bytes (o simulador local também o aplica), cada instrução aceita no máximo 100 parâmetros e 100 KB de SQL; `DELETE ... RETURNING` funciona dentro de uma `batch`.
 
 ### Por confirmar em produção
 

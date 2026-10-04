@@ -75,8 +75,8 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`), exceto as du
 | `DELETE /api/files/:id` | Manda o ficheiro para a lixeira |
 | `GET /api/config` | Limites do servidor para o browser: `{ maxUploadBytes }` |
 | `GET /api/search?q=` | Pesquisa por nome nas pastas e nos ficheiros (sem distinguir maiúsculas nem acentos; 2 a 100 caracteres; até 50 resultados, cada um com o caminho da pasta onde está) |
-| `GET /api/trash` | A lixeira: até 200 ficheiros excluídos, os mais recentes primeiro, com a pasta onde estavam e a data da eliminação automática (`total` conta todos) |
-| `POST /api/trash/:id/restore` | Restaura um ficheiro; se o nome estiver ocupado acrescenta « (restaurado)», « (restaurado 2)», … |
+| `GET /api/trash` | A lixeira: até 200 ficheiros excluídos, os mais recentes primeiro, com a pasta onde estavam e a data da eliminação automática (`purgeAt`; o cron que a aplica chega no Plano 4); `total` conta todos |
+| `POST /api/trash/:id/restore` | Restaura um ficheiro; se o nome estiver ocupado tenta no máximo 10 nomes (o original e « (restaurado)» até « (restaurado 9)») e depois responde 409 `name_taken`; se a pasta original já não existir, o ficheiro volta para a raiz |
 | `DELETE /api/trash/:id` | Elimina um ficheiro de vez (apaga o objeto do R2 e devolve o espaço) |
 | `DELETE /api/trash` | Esvazia a lixeira por blocos de 50 e responde `{ purged, remaining }`: repetir até `remaining` ser 0 |
 | `POST /api/files/:id/shares` | Cria um link (`{ expiresAt? }`, em milissegundos Unix). O `token` só vem nesta resposta; no máximo 20 links ativos por ficheiro (409 `too_many_shares`) |

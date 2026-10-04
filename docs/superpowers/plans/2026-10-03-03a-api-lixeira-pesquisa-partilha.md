@@ -17,7 +17,7 @@ Valores da especificação e dos planos anteriores; todas as tarefas os cumprem 
 - Todas as consultas filtram pelo utilizador da sessão; o id de outro utilizador dá 404 (nunca 403). As rotas públicas só servem um ficheiro por um link ativo, e todos os casos em que não servem dão a mesma resposta `404 share_not_found`.
 - Erros da API em JSON: `{ "error": "<código>", "message": "<texto em português>" }`. Pedidos `POST`/`PUT`/`PATCH`/`DELETE` exigem `Origin` igual à origem do pedido (já garantido pelo middleware do Plano 1). O corpo JSON tem no máximo 64 KiB em toda a API, menos no upload.
 - Lixeira: excluir é pôr `deleted_at` (Plano 2A); `used_bytes` inclui os ficheiros na lixeira até à eliminação definitiva. Restaurar limpa `deleted_at`; se o nome já existe no destino, acrescenta " (restaurado)", " (restaurado 2)", …; se a pasta original já não existe, vai para a raiz. Eliminar de vez apaga o objeto do R2 e a linha, e desconta o tamanho em `used_bytes` (nunca abaixo de 0).
-- Pesquisa: `name_norm LIKE %q%` com `%` e `_` escapados; mínimo 2 caracteres; no máximo 50 resultados; só itens `ready` e fora da lixeira; cada resultado com o caminho completo.
+- Pesquisa: substring em `name_norm` com `instr(name_norm, q) > 0` (sem `LIKE`, que a D1 limita a 50 bytes; `%`, `_` e `\` valem como letras); mínimo 2 caracteres; no máximo 50 resultados; só itens `ready` e fora da lixeira; cada resultado com o caminho completo.
 - Partilha: token de 32 bytes aleatórios; a D1 guarda só o hash; o link completo só aparece na resposta da criação; a validade é opcional; o link só vale se o ficheiro estiver `ready` e fora da lixeira e o link não estiver expirado nem revogado (e a conta do dono estiver ativa).
 - O plano gratuito do Workers limita as chamadas a D1 e R2 a 50 por invocação: nunca uma consulta por item de uma lista; operações em lote por blocos de 50.
 - Descarregar: `Content-Disposition: attachment`; todas as respostas levam `X-Content-Type-Options: nosniff` e `Cache-Control: no-store`.
@@ -704,7 +704,7 @@ git commit -m "Acrescenta os tipos da lixeira, pesquisa e partilha e o cálculo 
 
 **Interfaces:**
 - Consumes: `normalizeName`, `searchKey` (`src/shared/names.ts`), `pathsForFolders`/`trailOf` (Task 2), `SearchResult` (Task 2), `createAuthedRouter`, `dbCountingPrepares` (Task 2).
-- Produces: `GET /api/search?q=` → `{ results: SearchResult[] }` (pastas e ficheiros prontos fora da lixeira; `name_norm LIKE %q%` com `%`, `_` e `\` escapados; mínimo 2 caracteres,
+- Produces: `GET /api/search?q=` → `{ results: SearchResult[] }` (pastas e ficheiros prontos fora da lixeira; pesquisa por substring em `name_norm` com `instr` (`%`, `_` e `\` valem como letras); mínimo 2 caracteres,
   máximo 100; no máximo 50 resultados, por nome; cada um com o `path` da pasta onde está). Erros: `400 query_too_short`, `400 query_too_long`.
 
 - [ ] **Step 1: A rota de pesquisa (teste primeiro)**
@@ -2331,7 +2331,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  3 passed (3)`.
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run`
-Expected: `Test Files  31 passed (31)`, `Tests  266 passed (266)`.
+Expected: `Test Files  31 passed (31)`, `Tests  268 passed (268)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2471,7 +2471,7 @@ por:
 - [ ] **Step 3: Verificação final**
 
 Run: `npx vitest run`
-Expected: `Test Files  31 passed (31)`, `Tests  266 passed (266)`.
+Expected: `Test Files  31 passed (31)`, `Tests  268 passed (268)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
 Expected: `Test Files  21 passed (21)`, `Tests  137 passed (137)` (a interface não mudou neste plano: os mesmos testes do Plano 2B).
@@ -2511,7 +2511,7 @@ git commit -m "Documenta a API da lixeira, da pesquisa e da partilha e regista o
 |---|---|
 | Spec §5, restaurar: limpa `deleted_at`; nome ocupado → sufixo " (restaurado)", " (restaurado 2)"…; pasta original apagada → raiz | Task 5 |
 | Spec §5, eliminar definitivamente (um ficheiro ou esvaziar): apaga o R2 e a linha e desconta a quota | Task 4 |
-| Spec §5, pesquisa: `name_norm LIKE`, `%` e `_` escapados, mínimo 2, máximo 50, só `ready` e fora da lixeira, com o caminho completo | Tasks 2 e 3 |
+| Spec §5, pesquisa: substring em `name_norm` com `instr`, mínimo 2, máximo 50, só `ready` e fora da lixeira, com o caminho completo | Tasks 2 e 3 |
 | Spec §5, partilha: token de 32 bytes, só o hash na D1, link completo só na criação, validade opcional, lista de ativos, revogar | Task 6 |
 | Spec §5, partilha: só vale com o ficheiro `ready` e fora da lixeira e o link nem expirado nem revogado; página pública com nome, tamanho e descarregar | Task 7 |
 | Spec §6: `GET /api/trash`, `POST /api/trash/:id/restore`, `DELETE /api/trash/:id`, `DELETE /api/trash`, `POST`/`GET /api/files/:id/shares`, `DELETE /api/shares/:id`, `GET /api/public/shares/:token` e `/download`, `GET /api/search?q=` | Tasks 3, 4, 5, 6 e 7 |
@@ -2526,9 +2526,10 @@ git commit -m "Documenta a API da lixeira, da pesquisa e da partilha e regista o
 
 **Fora deste plano:** a interface da lixeira, da pesquisa e da partilha (Plano 3B); o painel de administração e o cron de manutenção, que vai reutilizar `purgeTrashed` (Plano 4); o deploy (Plano 5). Até ao 3B nada na interface mostra a lixeira: os ficheiros excluídos continuam a ocupar quota.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 31 passed (31); Tests 266 passed (266). Interface: Test Files 21 passed (21); Tests 137 passed (137).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 31 passed (31); Tests 268 passed (268). Interface: Test Files 21 passed (21); Tests 137 passed (137).
 
 ## Notas da execução
 
 - **Decisões de desenho que a especificação deixa em aberto:** a lixeira lista no máximo 200 itens (`total` conta todos) e esvazia-se por blocos de 50 (`{ purged, remaining }`), porque cada chamada à API gasta chamadas de D1 e R2 do limite do plano gratuito; cada ficheiro tem no máximo 20 links ativos (`409 too_many_shares`), um teto simples contra linhas a mais; os links de uma conta que não está ativa (suspensa ou a ser apagada) deixam de funcionar; e `purgeTrashed` só apaga do R2 os objetos das linhas que o `DELETE ... RETURNING` apagou mesmo, para um ficheiro restaurado a meio nunca perder o conteúdo.
 - **Verificação manual:** a lista da Task 8 foi percorrida com `curl` contra o `npm run dev` durante a escrita deste plano (excluir, lixeira com `purgeAt` a 30 dias, restauro com ` (restaurado)`, pesquisa, link público sem cookie com `Content-Disposition: attachment`, revogação, esvaziar a lixeira e o espaço a descer).
+- **Corrigido na execução (o código do repositório prevalece sobre os blocos deste plano):** a Task 3 usa `instr(name_norm, ?2) > 0` em vez de `LIKE ... ESCAPE` (a D1 limita os padrões de `LIKE` a 50 bytes e uma pesquisa válida de 49 a 100 caracteres dava 500; `containsPattern` desapareceu e há dois testes novos); a Task 4 regista as chaves dos objetos órfãos no R2 (`purgeTrashed`); a ronda final acrescentou o teto de `expiresAt` (100 anos), o CSP no descarregamento, o teste paralelo dos 20 links (o único teste novo: com ele o Worker do ramo fica em 31 ficheiros / 269 testes, um acima dos totais deste plano, que são os da execução) e retoques de testes e comentários; e por isso os totais intermédios dos Expected das tarefas seguintes à 3 ficam 2 testes abaixo dos reais.
