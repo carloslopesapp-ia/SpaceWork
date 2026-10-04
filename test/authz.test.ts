@@ -89,6 +89,10 @@ describe("isolamento das partilhas", () => {
       const res = await api(path, { method, cookie: bob.cookie, json });
       expect(res.status, `${method} ${path}`).toBe(404);
     }
+    // O id do link não é o token: a rota pública não o aceita, nem com a sessão do Bob.
+    const byId = await api(`/api/public/shares/${share.id}`, { cookie: bob.cookie });
+    expect(byId.status).toBe(404);
+    expect(await byId.json()).toMatchObject({ error: "share_not_found" });
     const mine = await api(`/api/files/${ficheiro.id}/shares`, { cookie: ana.cookie });
     expect(((await mine.json()) as { shares: unknown[] }).shares).toHaveLength(1);
   });

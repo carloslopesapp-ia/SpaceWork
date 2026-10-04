@@ -28,7 +28,7 @@ describe("GET /api/search", () => {
 
   it("recusa pesquisas com menos de 2 caracteres (depois de tirar espaços e acentos) e com mais de 100", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    for (const q of ["", " a ", "́"]) {
+    for (const q of ["", " a ", "\u0301"]) {
       const res = await search(cookie, q);
       expect(res.status, JSON.stringify(q)).toBe(400);
       expect(await res.json()).toMatchObject({ error: "query_too_short" });
@@ -106,32 +106,32 @@ describe("GET /api/search", () => {
     expect(sql.filter((query) => query.includes("WITH RECURSIVE"))).toHaveLength(1);
   });
 
-  it("encontra ficheiros com pesquisas longas (>50 bytes) usando instr, não LIKE", async () => {
+  it("encontra ficheiros com uma pesquisa longa (mais de 50 bytes), com `%` e `_` literais", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    const query60 = "x".repeat(25) + "-relatorio_%_de_contas-" + "y".repeat(14);
-    const exactMatch = query60 + ".txt";
+    const queryLonga = "x".repeat(25) + "-relatorio_%_de_contas-" + "y".repeat(14);
+    const exactMatch = queryLonga + ".txt";
     const noMatch = "x".repeat(25) + "-relatorio_diferente_de_contas-" + "y".repeat(14) + ".txt";
     await uploadOk(cookie, exactMatch, "x");
     await uploadOk(cookie, noMatch, "x");
 
-    const found = await results(cookie, query60);
+    const found = await results(cookie, queryLonga);
     expect(names(found)).toEqual([exactMatch]);
   });
 
-  it("usa instr em vez de LIKE para evitar limite de 50 bytes na D1", async () => {
+  it("uma pesquisa longa (mais de 50 bytes) não usa LIKE na consulta: a D1 limita os padrões a 50 bytes", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    const query60 = "x".repeat(25) + "-relatorio_%_de_contas-" + "y".repeat(14);
-    const exactMatch = query60 + ".txt";
+    const queryLonga = "x".repeat(25) + "-relatorio_%_de_contas-" + "y".repeat(14);
+    const exactMatch = queryLonga + ".txt";
     await uploadOk(cookie, exactMatch, "x");
 
-    // A D1 limita padrões LIKE a 50 bytes, e o simulador não o aplica.
-    // Usamos instr em vez de LIKE para garantir que funciona com a D1 real.
+    // A D1 recusa padrões de LIKE com mais de 50 bytes (o simulador local também), por isso a consulta usa `instr`.
     const { db, sql } = dbCountingPrepares();
-    const res = await fetchWithEnv(buildRequest(`/api/search?q=${encodeURIComponent(query60)}`, { cookie }), { DB: db });
+    const res = await fetchWithEnv(buildRequest(`/api/search?q=${encodeURIComponent(queryLonga)}`, { cookie }), { DB: db });
     const found = ((await res.json()) as { results: SearchResult[] }).results;
 
     expect(found).toHaveLength(1);
     const searchQueries = sql.filter((query) => query.includes("SELECT") && query.includes("files"));
-    expect(searchQueries.some((q) => q.includes("LIKE"))).toBe(false);
+    expect(searchQueries).toHaveLength(1);
+    expect(searchQueries[0]).not.toContain("LIKE");
   });
 });

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrashContents } from "../src/shared/types";
 import { registerUser } from "./auth-helpers";
 import { dbWithStatementHook, fetchWithEnv, silenceErrors } from "./db-helpers";
@@ -8,6 +8,9 @@ import { createFolder, getContents } from "./folder-helpers";
 import { api, buildRequest, resetState } from "./helpers";
 
 beforeEach(resetState);
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const DAY_MS = 86_400_000;
 

@@ -24,8 +24,8 @@ interface SearchRow {
  * Pesquisa por nome (sem maiúsculas nem acentos) nas pastas e nos ficheiros prontos e fora da lixeira do utilizador:
  * mínimo 2 caracteres, no máximo 50 resultados, por ordem de nome. Cada resultado traz o caminho da pasta onde está.
  *
- * Usa `instr` em vez de `LIKE` porque a D1 limita padrões de `LIKE` a 50 bytes, e o simulador local não o aplica.
- * Assim garantimos compatibilidade com a D1 real para pesquisas até 100 caracteres.
+ * Usa `instr` em vez de `LIKE` porque a D1 limita padrões de `LIKE` a 50 bytes (o simulador local também o aplica: uma
+ * pesquisa válida de 49 a 100 caracteres dava 500). Assim funcionam todas as pesquisas até 100 caracteres.
  * O `instr` trata `%`, `_` e `\` como caracteres literais, como pretendido.
  */
 search.get("/", async (c) => {

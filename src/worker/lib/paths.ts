@@ -6,8 +6,8 @@ const CHUNK_SIZE = 50;
 
 /**
  * O caminho (da raiz até à pasta, inclusive) de cada uma das pastas pedidas. Uma consulta recursiva por bloco de 50 pastas,
- * nunca uma por pasta: o plano gratuito do Workers limita as chamadas por invocação, e uma pesquisa ou a lixeira
- * mostram até 200 itens. Pastas que não existem ou são de outro utilizador ficam fora do mapa.
+ * nunca uma por pasta: o plano gratuito do Workers limita as chamadas por invocação, e a pesquisa mostra
+ * até 50 itens e a lixeira até 200. Pastas que não existem ou são de outro utilizador ficam fora do mapa.
  */
 export async function pathsForFolders(
   db: D1Database,

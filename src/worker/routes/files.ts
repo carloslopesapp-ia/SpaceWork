@@ -115,7 +115,8 @@ files.put("/", async (c) => {
 
 /**
  * Desfaz a reserva de um upload que falhou: devolve o espaço e apaga a linha `pending`, numa só
- * `batch` (o espaço só se devolve se a linha `pending` ainda existe).
+ * `batch` (o espaço só se devolve se a linha `pending` ainda existe). O `UPDATE` tem de vir antes do
+ * `DELETE`: o `EXISTS` precisa de ver a linha.
  *
  * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
  * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
@@ -242,7 +243,7 @@ files.patch("/:id", async (c) => {
 
 /**
  * Exclui um ficheiro: manda-o para a lixeira (`deleted_at`). O objeto no R2 e a quota ficam como
- * estão até o ficheiro ser eliminado de vez (lixeira e limpeza automática: planos seguintes).
+ * estão até o ficheiro ser eliminado de vez (a lixeira é `/api/trash`; a limpeza automática é do Plano 4).
  */
 files.delete("/:id", async (c) => {
   const result = await c.env.DB.prepare(

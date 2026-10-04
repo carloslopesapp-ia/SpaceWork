@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicShare, ShareItem } from "../src/shared/types";
 import { registerUser, setUserStatus } from "./auth-helpers";
 import { silenceErrors } from "./db-helpers";
@@ -7,6 +7,9 @@ import { bodyText, uploadOk } from "./file-helpers";
 import { api, resetState } from "./helpers";
 
 beforeEach(resetState);
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function share(cookie: string, fileId: string, json: unknown = {}): Promise<{ share: ShareItem; token: string }> {
   const res = await api(`/api/files/${fileId}/shares`, { method: "POST", cookie, json });
@@ -52,7 +55,7 @@ describe("páginas públicas de partilha", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("um link que nunca existiu e um ativo falham do mesmo modo que um link revogado, expirado ou de um ficheiro na lixeira (404 igual, sem pistas)", async () => {
+  it("um link que nunca existiu falha do mesmo modo que um revogado ou expirado, e o ativo não é afetado (404 igual, sem pistas)", async () => {
     const { ana, file, token } = await setup();
     const expired = await share(ana.cookie, file.id, { expiresAt: Date.now() + 3_600_000 });
     const revoked = await share(ana.cookie, file.id);
@@ -84,10 +87,10 @@ describe("páginas públicas de partilha", () => {
     expect((await download(token)).status).toBe(200);
   });
 
-  it("depois de eliminar o ficheiro de vez, o link nunca mais funciona (as partilhas saem em cascata)", async () => {
+  it("eliminar o ficheiro de vez apaga as suas partilhas (cascata) e o link morre", async () => {
     const { ana, file, token } = await setup();
-    await api(`/api/files/${file.id}`, { method: "DELETE", cookie: ana.cookie });
-    await api(`/api/trash/${file.id}`, { method: "DELETE", cookie: ana.cookie });
+    expect((await api(`/api/files/${file.id}`, { method: "DELETE", cookie: ana.cookie })).status).toBe(204);
+    expect((await api(`/api/trash/${file.id}`, { method: "DELETE", cookie: ana.cookie })).status).toBe(204);
 
     expect((await info(token)).status).toBe(404);
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM shares").first<{ n: number }>())?.n).toBe(0);
