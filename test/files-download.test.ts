@@ -177,6 +177,56 @@ describe("GET /api/files/:id/preview", () => {
       expect(res.headers.get("content-range")).toBe("bytes */10");
     });
 
+    it("um fim para lá do tamanho é limitado ao último byte, tal como um sufixo maior do que o ficheiro", async () => {
+      const { get } = await setup();
+      for (const range of ["bytes=0-100", "bytes=-100"]) {
+        const res = await get(range);
+        expect(res.status, range).toBe(206);
+        expect(res.headers.get("content-range"), range).toBe("bytes 0-9/10");
+        expect(res.headers.get("content-length"), range).toBe("10");
+        expect(await bodyText(res), range).toBe("0123456789");
+      }
+    });
+
+    it("um intervalo invertido (bytes=5-2) é ignorado e devolve o ficheiro todo", async () => {
+      const { get } = await setup();
+      const res = await get("bytes=5-2");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-range")).toBeNull();
+      expect(await bodyText(res)).toBe("0123456789");
+    });
+
+    it("um sufixo de zero bytes e um início no fim do ficheiro dão 416", async () => {
+      const { get } = await setup();
+      for (const range of ["bytes=-0", "bytes=10-", "bytes=10-12"]) {
+        const res = await get(range);
+        expect(res.status, range).toBe(416);
+        expect(res.headers.get("content-range"), range).toBe("bytes */10");
+      }
+    });
+
+    it("números enormes: um início assim dá 416; um fim ou um sufixo assim contam como 'até ao fim'", async () => {
+      const { get } = await setup();
+      const huge = "99999999999999999999";
+      expect((await get(`bytes=${huge}-`)).status).toBe(416);
+      for (const range of [`bytes=0-${huge}`, `bytes=-${huge}`]) {
+        const res = await get(range);
+        expect(res.status, range).toBe(206);
+        expect(res.headers.get("content-range"), range).toBe("bytes 0-9/10");
+      }
+    });
+
+    it("num ficheiro vazio qualquer intervalo dá 416 com Content-Range bytes */0", async () => {
+      const { cookie } = await registerUser("ana@example.com");
+      const empty = await uploadOk(cookie, "vazio.pdf", "", { type: "application/pdf" });
+      for (const range of ["bytes=-5", "bytes=0-", "bytes=0-0"]) {
+        const res = await api(`/api/files/${empty.id}/preview`, { cookie, headers: { Range: range } });
+        expect(res.status, range).toBe(416);
+        expect(res.headers.get("content-range"), range).toBe("bytes */0");
+      }
+      expect((await api(`/api/files/${empty.id}/preview`, { cookie })).status).toBe(200); // sem Range, o ficheiro vazio
+    });
+
     it("formatos não suportados são ignorados e devolvem o ficheiro todo", async () => {
       const { get } = await setup();
       for (const range of ["bytes=abc", "bytes=0-1,3-4", "items=0-1", "bytes=-"]) {

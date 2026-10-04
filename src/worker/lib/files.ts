@@ -102,3 +102,37 @@ export function contentDisposition(type: "attachment" | "inline", filename: stri
   );
   return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
+
+/** Intervalo de bytes já resolvido contra o tamanho do ficheiro; "unsatisfiable" = 416. */
+export type ByteRange = { offset: number; length: number } | "unsatisfiable";
+
+/** Um número do cabeçalho `Range`; se não for um inteiro seguro vale Infinity ("até ao fim", ou depois do fim). */
+function rangeNumber(digits: string): number {
+  const value = Number(digits);
+  return Number.isSafeInteger(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Lê um `Range: bytes=a-b | a- | -n` (um único intervalo) contra `size`. Devolve `null` se o cabeçalho
+ * falta, tem outro formato ou é um intervalo invertido (`b < a`): nesses casos ignora-se e serve-se o ficheiro
+ * todo. Um fim ou sufixo para lá do tamanho conta como "até ao fim".
+ */
+export function parseRange(header: string | undefined, size: number): ByteRange | null {
+  const match = /^bytes=(\d*)-(\d*)$/.exec((header ?? "").trim());
+  if (match === null || (match[1] === "" && match[2] === "")) return null;
+  const [, first, last] = match;
+
+  if (first === "") {
+    // Sufixo: os últimos `n` bytes.
+    const suffix = rangeNumber(last);
+    if (suffix === 0 || size === 0) return "unsatisfiable";
+    const offset = Math.max(size - suffix, 0);
+    return { offset, length: size - offset };
+  }
+
+  const start = rangeNumber(first);
+  if (start >= size) return "unsatisfiable"; // inclui o ficheiro vazio
+  const end = last === "" ? Number.POSITIVE_INFINITY : rangeNumber(last);
+  if (last !== "" && end < start) return null;
+  return { offset: start, length: Math.min(end, size - 1) - start + 1 };
+}

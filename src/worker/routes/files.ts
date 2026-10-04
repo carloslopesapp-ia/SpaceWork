@@ -4,6 +4,7 @@ import { getConfig } from "../config";
 import { ApiError, rethrowConstraint } from "../errors";
 import {
   contentDisposition,
+  parseRange,
   previewContentType,
   r2KeyFor,
   requireFile,
@@ -162,16 +163,10 @@ files.get("/:id/download", async (c) => {
   });
 });
 
-/** Posição e tamanho de um intervalo já resolvido pelo R2. */
-function resolveRange(range: R2Range | undefined, size: number): { offset: number; length: number } {
-  const r = (range ?? {}) as { offset?: number; length?: number; suffix?: number };
-  const offset = r.offset ?? (r.suffix !== undefined ? Math.max(size - r.suffix, 0) : 0);
-  return { offset, length: r.length ?? size - offset };
-}
-
 /**
  * Pré-visualização inline, só para imagens e PDF (lista fixa por extensão). O Content-Type vem
- * dessa lista e não do valor guardado. Suporta um único intervalo (`Range: bytes=a-b`, `a-`, `-n`).
+ * dessa lista e não do valor guardado. Suporta um único intervalo (`Range: bytes=a-b`, `a-`, `-n`),
+ * resolvido contra o tamanho da D1 (ver `parseRange`).
  */
 files.get("/:id/preview", async (c) => {
   const file = await requireFile(c.env.DB, c.get("user").id, c.req.param("id"));
@@ -180,35 +175,30 @@ files.get("/:id/preview", async (c) => {
     throw new ApiError(415, "preview_unsupported", "Este tipo de ficheiro não tem pré-visualização.");
   }
 
-  // Só um intervalo simples conta; qualquer outro formato é ignorado e devolve-se o ficheiro todo.
-  const match = /^bytes=(\d*)-(\d*)$/.exec((c.req.header("range") ?? "").trim());
-  const ranged = match !== null && (match[1] !== "" || match[2] !== "");
-  const object = await c.env.FILES.get(file.r2Key, ranged ? { range: c.req.raw.headers } : undefined);
-  if (!object) throw missingObject(file.id);
-
   const headers = new Headers({
     "Content-Type": contentType,
     "Content-Disposition": contentDisposition("inline", file.name),
     "Accept-Ranges": "bytes",
-    ETag: object.httpEtag,
   });
   if (contentType.startsWith("image/")) {
     headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
   }
 
-  if (ranged && match) {
-    // O R2 devolve o ficheiro todo quando o intervalo começa depois do fim; aqui é 416.
-    if (match[1] !== "" && Number(match[1]) >= object.size) {
-      await object.body.cancel();
-      headers.set("Content-Range", `bytes */${object.size}`);
-      return new Response(null, { status: 416, headers });
-    }
-    const { offset, length } = resolveRange(object.range, object.size);
-    headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
-    headers.set("Content-Length", String(length));
-    return new Response(object.body, { status: 206, headers });
+  const range = parseRange(c.req.header("range"), file.size);
+  if (range === "unsatisfiable") {
+    headers.set("Content-Range", `bytes */${file.size}`);
+    return new Response(null, { status: 416, headers });
   }
 
+  const object = await c.env.FILES.get(file.r2Key, range ? { range } : undefined);
+  if (!object) throw missingObject(file.id);
+  headers.set("ETag", object.httpEtag);
+
+  if (range) {
+    headers.set("Content-Range", `bytes ${range.offset}-${range.offset + range.length - 1}/${file.size}`);
+    headers.set("Content-Length", String(range.length));
+    return new Response(object.body, { status: 206, headers });
+  }
   headers.set("Content-Length", String(object.size));
   return new Response(object.body, { headers });
 });
