@@ -69,6 +69,12 @@ export async function requireFile(
   return file;
 }
 
+/** O ficheiro sem a chave do R2, pronto para sair na resposta da API. */
+export function toFileItem(file: StoredFile): FileItem {
+  const { r2Key: _r2Key, ...item } = file;
+  return item;
+}
+
 // Só estes tipos abrem dentro da app. SVG e HTML ficam de fora de propósito: executariam código no nosso domínio.
 const PREVIEW_TYPES: Record<string, string> = {
   png: "image/png",

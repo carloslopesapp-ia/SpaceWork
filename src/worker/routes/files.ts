@@ -8,9 +8,12 @@ import {
   r2KeyFor,
   requireFile,
   sanitizeMime,
+  toFileItem,
 } from "../lib/files";
 import { parseFolderRef, requireFolder } from "../lib/folders";
+import { readJsonObject, readString } from "../lib/http";
 import { parseName } from "../lib/names";
+import { jsonBodyLimit } from "../middleware/body-limit";
 import { createAuthedRouter } from "./authed";
 
 export const files = createAuthedRouter();
@@ -211,4 +214,61 @@ files.get("/:id/preview", async (c) => {
 
   headers.set("Content-Length", String(object.size));
   return new Response(object.body, { headers });
+});
+
+/** Renomeia e/ou move um ficheiro (`folderId: null` ou "root" = raiz). Só mexe na D1: a chave do R2 não muda. */
+files.patch("/:id", jsonBodyLimit, async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const file = await requireFile(db, userId, c.req.param("id"));
+  const body = await readJsonObject(c);
+  const hasName = "name" in body;
+  const hasFolder = "folderId" in body;
+  if (!hasName && !hasFolder) {
+    throw new ApiError(400, "invalid_body", "Indique o novo nome e/ou a nova pasta.");
+  }
+
+  const name = hasName ? parseName(readString(body, "name")) : file.name;
+  const folderId = hasFolder ? parseFolderRef(body.folderId) : file.folderId;
+  if (hasFolder && folderId !== null) await requireFolder(db, userId, folderId);
+
+  let updated;
+  try {
+    updated = await db
+      .prepare(
+        `UPDATE files SET name = ?1, name_norm = ?2, folder_id = ?3
+         WHERE id = ?4 AND user_id = ?5 AND status = 'ready' AND deleted_at IS NULL`,
+      )
+      .bind(name, searchKey(name), folderId, file.id, userId)
+      .run();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome nesse local.");
+    }
+    if (isForeignKeyViolation(error)) {
+      throw new ApiError(404, "folder_not_found", "Pasta não encontrada.");
+    }
+    throw error;
+  }
+  if (updated.meta.changes !== 1) {
+    throw new ApiError(404, "file_not_found", "Ficheiro não encontrado.");
+  }
+  return c.json({ file: { ...toFileItem(file), name, folderId } });
+});
+
+/**
+ * Exclui um ficheiro: manda-o para a lixeira (`deleted_at`). O objeto no R2 e a quota ficam como
+ * estão até o ficheiro ser eliminado de vez (lixeira e limpeza automática: planos seguintes).
+ */
+files.delete("/:id", async (c) => {
+  const result = await c.env.DB.prepare(
+    `UPDATE files SET deleted_at = ?1
+     WHERE id = ?2 AND user_id = ?3 AND status = 'ready' AND deleted_at IS NULL`,
+  )
+    .bind(Date.now(), c.req.param("id"), c.get("user").id)
+    .run();
+  if (result.meta.changes !== 1) {
+    throw new ApiError(404, "file_not_found", "Ficheiro não encontrado.");
+  }
+  return c.body(null, 204);
 });
