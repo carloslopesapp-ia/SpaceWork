@@ -36,7 +36,9 @@ unset MASTER_PASSWORD
 
 | Comando | O que faz |
 |---|---|
-| `npm test` | Testes (Vitest no runtime do Workers, com D1 e R2 locais) |
+| `npm test` | Todos os testes (`test:worker` e `test:web`) |
+| `npm run test:worker` | Testes da API (Vitest no runtime do Workers, com D1 e R2 locais) |
+| `npm run test:web` | Testes da interface (Vitest em jsdom, com o Testing Library) |
 | `npm run typecheck` | Verifica os tipos de todo o projeto (`tsc -b`) |
 | `npm run build` | Build de produção em `dist/` |
 | `npm run cf-typegen` | Regenera `worker-configuration.d.ts` (depois de alterar `wrangler.jsonc`) |
@@ -50,14 +52,14 @@ scripts/       seed-master
 src/worker/    API (Hono): rotas, lib, middleware
 src/web/       SPA React
 src/shared/    tipos e funções partilhadas
-test/          testes
+test/          testes do Worker (os da interface ficam ao lado do código, em src/web/**/*.test.tsx)
 ```
 
 ## API (pastas e ficheiros)
 
 Todas as rotas desta secção exigem sessão (cookie `sw_session`). Em toda a API só são públicas `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout` e `GET /api/health`. Os pedidos que alteram dados (`POST`, `PUT`, `PATCH`, `DELETE`) exigem o cabeçalho `Origin`, que tem de coincidir com a origem do pedido (senão 403 `forbidden_origin`). Os erros vêm em `{ "error": "<código>", "message": "<texto>" }`.
 
-`parentId` (pastas) e `folderId` (ficheiros) aceitam `null` ou `"root"` para a raiz; no upload, omitir `folder` também significa a raiz.
+`parentId` (pastas) e `folderId` (ficheiros) aceitam `null` ou `"root"` para a raiz; no upload, omitir `folder` também significa a raiz. As pastas têm no máximo 100 níveis (senão 400 `folder_too_deep`).
 
 | Pedido | Descrição |
 |---|---|
@@ -71,5 +73,10 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`). Em toda a AP
 | `GET /api/files/:id/preview` | Pré-visualiza imagens e PDF (suporta `Range`) |
 | `PATCH /api/files/:id` | Renomeia e/ou move (`{ name?, folderId? }`) |
 | `DELETE /api/files/:id` | Manda o ficheiro para a lixeira |
+| `GET /api/config` | Limites do servidor para o browser: `{ maxUploadBytes }` |
+
+## Interface
+
+Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮» com pré-visualizar (imagens e PDF), descarregar, renomear, mover e excluir. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem). Até ao Plano 3 não há ecrã da lixeira: os ficheiros excluídos continuam a ocupar quota.
 
 Não fazer `git push` sem confirmação do dono do projeto.

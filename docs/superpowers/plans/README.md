@@ -6,7 +6,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 |---|---|---|---|
 | 1 | [Fundação](2026-10-03-01-fundacao.md) | Projeto Cloudflare, esquema D1, autenticação completa (registo, login, logout, alterar senha), master, interface de login/registo/conta | Concluído |
 | 2A | [API de pastas e ficheiros](2026-10-03-02a-api-pastas-ficheiros.md) | Pastas (listar, criar, renomear, mover, excluir vazias), upload com quota atómica, descarregar, pré-visualizar, renomear, mover e excluir ficheiros; isolamento entre utilizadores | Concluído |
-| 2B | [Interface "Meu espaço"](2026-10-03-02b-interface-meu-espaco.md) | Lista, caminho (*breadcrumb*), nova pasta, upload com progresso (3 em paralelo), menu de ações, mover, pré-visualização de imagens e PDF; API: `GET /api/config`, limite de 100 níveis nas pastas | Escrito, por executar |
+| 2B | [Interface "Meu espaço"](2026-10-03-02b-interface-meu-espaco.md) | Lista, caminho (*breadcrumb*), nova pasta, upload com progresso (3 em paralelo), menu de ações, mover, pré-visualização de imagens e PDF; API: `GET /api/config`, limite de 100 níveis nas pastas | Concluído |
 | 3 | Lixeira, pesquisa e partilha | Lixeira com restauro, pesquisa por nome, links públicos e página `/s/:token` | Por escrever |
 | 4 | Admin e manutenção | Painel de utilizadores e quotas, remoção de contas, cron de limpeza | Por escrever |
 | 5 | Deploy e testes de ponta a ponta | Recursos na Cloudflare, `wrangler deploy`, teste Playwright de fumo, medição de CPU do PBKDF2 | Por escrever |
@@ -38,19 +38,12 @@ Resultado da revisão final do ramo do Plano 1 (achados diferidos de propósito)
 - Resolvido: testes de esquema em falta (`used_bytes >= 0`, `CHECK` de `status`) em `test/schema-constraints.test.ts`.
 - Resolvido em parte: as respostas de descarga e de pré-visualização levam `Cache-Control: no-store` (cabeçalho global da API). O CSP `sandbox` ficou feito só na pré-visualização de imagens (o PDF precisa do leitor do browser). **Falta decidir o caso do descarregamento** (`Content-Disposition: attachment`): confirmar no Plano 5, com o Playwright.
 
-**Plano 2B (interface "Meu espaço")**
-- Herdado do Plano 1 (frontend): tratamento central do 401 (invalidar `ME_KEY`), mensagem de falha de rede em português (hoje aparece "Failed to fetch"), "Sair" com feedback de erro, botão de repetir no estado de erro do layout, testes do contrato `apiFetch`/`useMe`, invalidar `ME_KEY` depois de uploads e exclusões, substituir o marcador de posição da `HomePage`.
-- Novo (revisão final do 2A): expor `maxUploadBytes` (em `/api/auth/me` ou num `GET /api/config`) e validar o tamanho no cliente antes do XHR: um corpo acima do limite da Cloudflare recebe da *edge* um 413 que não é JSON.
-- Novo: construir o URL do upload com `URLSearchParams`/`encodeURIComponent` (o Hono decodifica `+` como espaço).
-- Novo: mover `PREVIEW_TYPES`/`previewContentType` para `src/shared`, para o menu só mostrar "Pré-visualizar" quando o servidor a aceita.
-- Novo: exportar uma união `ApiErrorCode` em `src/shared/types.ts` e mapeá-la para mensagens em português.
-- Novo: invalidar `ME_KEY` e as consultas de `contents` e `tree` depois de cada mutação.
-- Novo: evitar miniaturas via `/preview` (o `no-store` impede a cache).
-- Novo: um 409 `name_taken` pode vir de um upload `pending` invisível: a mensagem deve sugerir isso.
-- Novo: no diálogo "Mover", desativar a própria pasta e as suas descendentes.
-
-- Novo (re-revisão final do 2A): `test/names.test.ts` tem caracteres invisíveis literais (U+0301, NBSP, BOM, bidi U+202E, ZWJ) em vez de escapes `\u…`: trocar por escapes (o GitHub mostra um aviso de Unicode bidirecional) e manter as guardas.
-- Novo: `POST /api/folders` não limita a profundidade. As consultas recursivas ficam limitadas a 1000 níveis, mas mover para uma zona mais funda dá `invalid_move` com uma mensagem enganadora: limitar a profundidade ao criar/mover (por exemplo 100) e dizer isso na mensagem.
+**Plano 2B (interface "Meu espaço"): resolvido no Plano 2B**
+- Resolvido: tratamento central do 401 (`setUnauthorizedHandler`: `["me"]` passa a `null` e o layout vai para o login), falha de rede em português, «Sair» com erro, botão de repetir no erro do layout, testes de `apiFetch`/`useMe`, e `["me"]`, as listagens (`["folder", …]`) e a árvore (`["tree"]`) invalidados depois de cada mutação e de cada envio.
+- Resolvido: `GET /api/config` (`maxUploadBytes`) e validação do tamanho no cliente antes do XHR; URL do upload com `URLSearchParams`; `previewContentType` em `src/shared` (o menu só mostra «Pré-visualizar» quando o servidor a aceita); sem miniaturas; o 409 `name_taken` de ficheiros diz que pode ser um envio em curso; o diálogo «Mover» desativa a pasta atual e, ao mover uma pasta, ela e as descendentes; `test/names.test.ts` com escapes `\u…`; profundidade máxima de 100 níveis nas pastas (`400 folder_too_deep`; ao mover conta a subárvore).
+- Decidido não fazer: a união `ApiErrorCode` e o mapa de mensagens. O servidor já responde em português e a interface só mostra `message`; exportar a união quando a interface precisar de decidir por código.
+- Fica para o Plano 5 (Playwright, browser real): no diálogo de pré-visualização de um PDF, o leitor do Chrome fica com o foco depois de carregar e o Esc não fecha o diálogo (o botão «Fechar», o clique no fundo e o Tab funcionam; tentou-se devolver o foco ao botão no `onLoad`, mas o leitor volta a tomá-lo meio segundo depois); confirmar também o arrastar-e-largar e o envio com `Content-Length` num browser real.
+- Fica para o Plano 3: o ecrã da lixeira. Até lá, «Excluir» num ficheiro só o manda para a lixeira e o espaço não é libertado.
 
 **Plano 3 (lixeira, pesquisa, partilha)**
 - Decrementos de quota com `MAX(used_bytes - ?, 0)`, para um desvio de contabilidade não fazer falhar a `batch` para sempre.
