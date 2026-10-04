@@ -1,8 +1,10 @@
-import type { TrashContents, TrashItem } from "../../shared/types";
+import { searchKey } from "../../shared/names";
+import type { FileItem, TrashContents, TrashItem } from "../../shared/types";
 import { getConfig } from "../config";
-import { ApiError } from "../errors";
-import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
+import { ApiError, isUniqueViolation } from "../errors";
+import { FILE_COLUMNS, fileNameTaken, rowToFile, type FileRow } from "../lib/files";
 import { pathsForFolders, trailOf } from "../lib/paths";
+import { restoreCandidates } from "../lib/restore-names";
 import { purgeTrashed, TRASH_PURGE_BATCH } from "../lib/trash";
 import { createAuthedRouter } from "./authed";
 
@@ -81,4 +83,39 @@ trash.delete("/", async (c) => {
     .all<{ id: string }>();
   const purged = await purgeTrashed(c.env, userId, results.map((row) => row.id));
   return c.json({ purged, remaining: await countTrashed(db, userId) });
+});
+
+/**
+ * Restaura um ficheiro da lixeira (limpa `deleted_at`; a quota já o contava). Se o nome já está ocupado no destino,
+ * experimenta os nomes de `restoreCandidates`; o destino é a pasta onde estava (ao apagar uma pasta, os ficheiros
+ * que estavam na lixeira passaram para a raiz, por isso `folder_id` existe sempre ou é a raiz).
+ */
+trash.post("/:id/restore", async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const row = await db
+    .prepare(
+      `SELECT ${FILE_COLUMNS} FROM files WHERE id = ?1 AND user_id = ?2 AND status = 'ready' AND deleted_at IS NOT NULL`,
+    )
+    .bind(c.req.param("id"), userId)
+    .first<FileRow>();
+  if (!row) throw new ApiError(404, "file_not_found", "Ficheiro não encontrado na lixeira.");
+
+  for (const name of restoreCandidates(row.name)) {
+    try {
+      const restored = await db
+        .prepare(
+          `UPDATE files SET deleted_at = NULL, name = ?1, name_norm = ?2
+           WHERE id = ?3 AND user_id = ?4 AND status = 'ready' AND deleted_at IS NOT NULL`,
+        )
+        .bind(name, searchKey(name), row.id, userId)
+        .run();
+      // Nenhuma linha alterada: outro pedido restaurou-o ou eliminou-o entretanto.
+      if (restored.meta.changes !== 1) throw new ApiError(404, "file_not_found", "Ficheiro não encontrado na lixeira.");
+      return c.json({ file: { ...rowToFile(row), name } satisfies FileItem });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error; // nome ocupado: tenta o seguinte
+    }
+  }
+  throw fileNameTaken();
 });
