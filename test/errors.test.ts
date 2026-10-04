@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isForeignKeyViolation, isUniqueViolation } from "../src/worker/errors";
+import { ApiError, isForeignKeyViolation, isUniqueViolation, rethrowConstraint } from "../src/worker/errors";
 
 const UNIQUE =
   "D1_ERROR: UNIQUE constraint failed: index 'folders_unique_name': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)";
@@ -22,5 +22,24 @@ describe("deteção de erros de restrição da D1", () => {
       expect(isUniqueViolation(value)).toBe(false);
       expect(isForeignKeyViolation(value)).toBe(false);
     }
+  });
+});
+
+describe("rethrowConstraint", () => {
+  const taken = new ApiError(409, "name_taken", "repetido");
+  const missing = new ApiError(404, "folder_not_found", "em falta");
+  const mapping = { unique: taken, foreignKey: missing };
+
+  it("converte a violação de unicidade e a de chave estrangeira nos erros indicados", () => {
+    expect(() => rethrowConstraint(new Error(UNIQUE), mapping)).toThrow(taken);
+    expect(() => rethrowConstraint(new Error(FOREIGN_KEY), mapping)).toThrow(missing);
+  });
+
+  it("relança o erro original quando não há correspondência (ou o mapeamento não a cobre)", () => {
+    const other = new Error("d1 em baixo");
+    expect(() => rethrowConstraint(other, mapping)).toThrow(other);
+    expect(() => rethrowConstraint(new Error(UNIQUE), { foreignKey: missing })).toThrow(UNIQUE);
+    expect(() => rethrowConstraint(new Error(FOREIGN_KEY), { unique: taken })).toThrow(FOREIGN_KEY);
+    expect(() => rethrowConstraint("texto", {})).toThrow("texto");
   });
 });

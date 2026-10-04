@@ -35,6 +35,10 @@ async function foldersInCycles(userId: string): Promise<string[]> {
   return results.map((row) => row.start);
 }
 
+async function deleteFolderRow(id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM folders WHERE id = ?1").bind(id).run();
+}
+
 /** PATCH de pasta com `DB` em Proxy: `before` corre imediatamente antes do `UPDATE folders` do pedido. */
 function patchWithRace(cookie: string, id: string, json: unknown, before: () => Promise<void>) {
   const racingDb = dbWithStatementHook(/^\s*UPDATE folders SET/, before);
@@ -107,5 +111,37 @@ describe("PATCH /api/folders/:id: corridas entre pedidos", () => {
     expect(move.status).toBe(400);
     expect(await move.json()).toMatchObject({ error: "invalid_move" });
     expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["C"]);
+  });
+});
+
+describe("pasta ou destino apagados a meio do pedido: 404 em vez de 500", () => {
+  it("POST /api/folders: a pasta-mãe é apagada antes do INSERT", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const parent = await createFolder(cookie, "Mãe");
+    const racingDb = dbWithStatementHook(/^\s*INSERT INTO folders/, () => deleteFolderRow(parent.id));
+    const res = await fetchWithEnv(
+      buildRequest("/api/folders", { method: "POST", cookie, json: { name: "Filha", parentId: parent.id } }),
+      { DB: racingDb },
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "folder_not_found" });
+  });
+
+  it("PATCH: o destino é apagado antes do UPDATE", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const dest = await createFolder(cookie, "Destino");
+    const res = await patchWithRace(cookie, a.id, { parentId: dest.id }, () => deleteFolderRow(dest.id));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "folder_not_found" });
+    expect(await parentOf(a.id)).toBeNull();
+  });
+
+  it("PATCH: a própria pasta é apagada antes do UPDATE", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const res = await patchWithRace(cookie, a.id, { name: "Novo" }, () => deleteFolderRow(a.id));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "folder_not_found" });
   });
 });

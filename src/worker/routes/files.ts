@@ -1,7 +1,7 @@
 import { formatBytes } from "../../shared/format";
 import { searchKey } from "../../shared/names";
 import { getConfig } from "../config";
-import { ApiError, isForeignKeyViolation, isUniqueViolation } from "../errors";
+import { ApiError, rethrowConstraint } from "../errors";
 import {
   contentDisposition,
   previewContentType,
@@ -80,14 +80,11 @@ files.put("/", async (c) => {
         .bind(size, user.id, id),
     ]);
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local.");
-    }
-    // A pasta foi apagada entre a verificação e a reserva.
-    if (isForeignKeyViolation(error)) {
-      throw new ApiError(404, "folder_not_found", "Pasta não encontrada.");
-    }
-    throw error;
+    rethrowConstraint(error, {
+      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local."),
+      // A pasta foi apagada entre a verificação e a reserva.
+      foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
+    });
   }
   if (reserved[0].meta.changes !== 1) {
     throw new ApiError(413, "quota_exceeded", "Sem espaço suficiente na sua quota.");
@@ -247,13 +244,11 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
       .bind(name, name === null ? null : searchKey(name), hasFolder ? 1 : 0, folderId, file.id, userId)
       .run();
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome nesse local.");
-    }
-    if (isForeignKeyViolation(error)) {
-      throw new ApiError(404, "folder_not_found", "Pasta não encontrada.");
-    }
-    throw error;
+    rethrowConstraint(error, {
+      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local."),
+      // O destino foi apagado entre a verificação e o UPDATE.
+      foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
+    });
   }
   if (updated.meta.changes !== 1) {
     throw new ApiError(404, "file_not_found", "Ficheiro não encontrado.");

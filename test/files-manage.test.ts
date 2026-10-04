@@ -128,6 +128,30 @@ describe("PATCH /api/files/:id: corridas entre pedidos do mesmo utilizador", () 
   });
 });
 
+describe("PATCH /api/files/:id: pasta ou ficheiro apagados a meio do pedido", () => {
+  it("o destino é apagado antes do UPDATE: 404 folder_not_found", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const docs = await createFolder(cookie, "Docs");
+    const file = await uploadOk(cookie, "a.txt", "x");
+    const res = await patchWithRace(cookie, file.id, { folderId: docs.id }, async () => {
+      await env.DB.prepare("DELETE FROM folders WHERE id = ?1").bind(docs.id).run();
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "folder_not_found" });
+    expect((await getContents(cookie)).files.map((f) => f.name)).toEqual(["a.txt"]);
+  });
+
+  it("o ficheiro vai para a lixeira antes do UPDATE: 404 file_not_found", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const file = await uploadOk(cookie, "a.txt", "x");
+    const res = await patchWithRace(cookie, file.id, { name: "novo.txt" }, async () => {
+      await env.DB.prepare("UPDATE files SET deleted_at = 5 WHERE id = ?1").bind(file.id).run();
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "file_not_found" });
+  });
+});
+
 describe("DELETE /api/files/:id (excluir para a lixeira)", () => {
   it("tira o ficheiro das listagens e dos downloads mas mantém objeto e quota", async () => {
     const { cookie, user } = await registerUser("ana@example.com");

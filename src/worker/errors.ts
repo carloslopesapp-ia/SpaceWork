@@ -21,3 +21,16 @@ export function isUniqueViolation(error: unknown): boolean {
 export function isForeignKeyViolation(error: unknown): boolean {
   return error instanceof Error && /FOREIGN KEY constraint failed/i.test(error.message);
 }
+
+/**
+ * Num `catch` à volta de uma escrita na D1: converte a violação de unicidade e/ou a de chave estrangeira
+ * nos erros indicados; qualquer outro erro (ou uma violação sem correspondência) é relançado tal como veio.
+ */
+export function rethrowConstraint(
+  error: unknown,
+  mapping: { unique?: ApiError; foreignKey?: ApiError },
+): never {
+  if (mapping.unique && isUniqueViolation(error)) throw mapping.unique;
+  if (mapping.foreignKey && isForeignKeyViolation(error)) throw mapping.foreignKey;
+  throw error;
+}

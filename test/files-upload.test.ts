@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/worker/app";
 import { registerUser } from "./auth-helpers";
+import { dbWithStatementHook } from "./db-helpers";
 import { countFiles, setQuota, uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
 import { ORIGIN, api, resetState } from "./helpers";
@@ -133,6 +134,19 @@ describe("PUT /api/files (upload)", () => {
     }
     expect(await countFiles()).toBe(0);
     expect(await usedBytes(ana.cookie)).toBe(0);
+  });
+
+  it("a pasta é apagada entre a verificação e a reserva: 404 folder_not_found, sem gastar quota", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const docs = await createFolder(cookie, "Docs");
+    const racingDb = dbWithStatementHook(/^\s*INSERT INTO files/, async () => {
+      await env.DB.prepare("DELETE FROM folders WHERE id = ?1").bind(docs.id).run();
+    });
+    const res = await rawUpload(`a.txt&folder=${docs.id}`, new Uint8Array(3), cookie, { DB: racingDb });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "folder_not_found" });
+    expect(await countFiles()).toBe(0);
+    expect(await usedBytes(cookie)).toBe(0);
   });
 
   it("recusa um nome repetido no mesmo sítio (409) sem gastar quota nem deixar objeto no R2", async () => {

@@ -1,5 +1,5 @@
 import { searchKey } from "../../shared/names";
-import { ApiError, isForeignKeyViolation, isUniqueViolation } from "../errors";
+import { ApiError, isForeignKeyViolation, rethrowConstraint } from "../errors";
 import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
 import {
   breadcrumbFor,
@@ -79,10 +79,11 @@ folders.post("/", async (c) => {
       .bind(id, userId, parentId, name, searchKey(name), createdAt)
       .run();
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ApiError(409, "name_taken", "Já existe uma pasta com esse nome neste local.");
-    }
-    throw error;
+    rethrowConstraint(error, {
+      unique: new ApiError(409, "name_taken", "Já existe uma pasta com esse nome neste local."),
+      // A pasta-mãe foi apagada entre a verificação e o INSERT.
+      foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
+    });
   }
   return c.json({ folder: { id, name, parentId, createdAt } }, 201);
 });
@@ -122,10 +123,11 @@ folders.patch("/:id", async (c) => {
       .bind(name, name === null ? null : searchKey(name), hasParent ? 1 : 0, parentId, folder.id, userId)
       .run();
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ApiError(409, "name_taken", "Já existe uma pasta com esse nome nesse local.");
-    }
-    throw error;
+    rethrowConstraint(error, {
+      unique: new ApiError(409, "name_taken", "Já existe uma pasta com esse nome neste local."),
+      // O destino foi apagado entre a verificação e o UPDATE.
+      foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
+    });
   }
   // Nenhuma linha alterada: ou a pasta já não existe, ou o destino passou a ser uma descendente dela.
   if (updated.meta.changes !== 1) {
