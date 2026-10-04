@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes } from "../src/shared/format";
+import { formatBytes, formatDate } from "../src/shared/format";
 
 describe("formatBytes", () => {
   it("devolve '0 B' para zero, negativos e valores inválidos", () => {
@@ -25,5 +25,12 @@ describe("formatBytes", () => {
 
   it("sobe de unidade quando o arredondamento chegaria a 1024", () => {
     expect(formatBytes(1_048_575)).toBe("1 MB");
+  });
+});
+
+describe("formatDate", () => {
+  it("formata a data em português, no fuso do utilizador", () => {
+    expect(formatDate(new Date(2026, 9, 3, 12).getTime())).toBe("03/10/2026");
+    expect(formatDate(new Date(2027, 0, 5, 23, 59).getTime())).toBe("05/01/2027");
   });
 });
