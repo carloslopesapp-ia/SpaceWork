@@ -7,7 +7,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 1 | [Fundação](2026-10-03-01-fundacao.md) | Projeto Cloudflare, esquema D1, autenticação completa (registo, login, logout, alterar senha), master, interface de login/registo/conta | Concluído |
 | 2A | [API de pastas e ficheiros](2026-10-03-02a-api-pastas-ficheiros.md) | Pastas (listar, criar, renomear, mover, excluir vazias), upload com quota atómica, descarregar, pré-visualizar, renomear, mover e excluir ficheiros; isolamento entre utilizadores | Concluído |
 | 2B | [Interface "Meu espaço"](2026-10-03-02b-interface-meu-espaco.md) | Lista, caminho (*breadcrumb*), nova pasta, upload com progresso (3 em paralelo), menu de ações, mover, pré-visualização de imagens e PDF; API: `GET /api/config`, limite de 100 níveis nas pastas | Concluído |
-| 3A | [API da lixeira, pesquisa e partilha](2026-10-03-03a-api-lixeira-pesquisa-partilha.md) | Lixeira (listar, restaurar com sufixo, eliminar de vez, esvaziar), pesquisa por nome com o caminho de cada resultado, links de partilha (criar com validade, listar, revogar) e as rotas públicas de nome, tamanho e descarregamento | Escrito, por executar |
+| 3A | [API da lixeira, pesquisa e partilha](2026-10-03-03a-api-lixeira-pesquisa-partilha.md) | Lixeira (listar, restaurar com sufixo, eliminar de vez, esvaziar), pesquisa por nome com o caminho de cada resultado, links de partilha (criar com validade, listar, revogar) e as rotas públicas de nome, tamanho e descarregamento | Concluído |
 | 3B | Interface da lixeira, pesquisa e partilha | Ecrã `/lixeira`, caixa de pesquisa, diálogo «Partilhar» e página pública `/s/:token` | Por escrever |
 | 4 | Admin e manutenção | Painel de utilizadores e quotas, remoção de contas, cron de limpeza | Por escrever |
 | 5 | Deploy e testes de ponta a ponta | Recursos na Cloudflare, `wrangler deploy`, teste Playwright de fumo, medição de CPU do PBKDF2 | Por escrever |
@@ -46,18 +46,10 @@ Resultado da revisão final do ramo do Plano 1 (achados diferidos de propósito)
 - Fica para o Plano 5 (Playwright, browser real): no diálogo de pré-visualização de um PDF, o leitor do Chrome fica com o foco depois de carregar e o Esc não fecha o diálogo (o botão «Fechar», o clique no fundo e o Tab funcionam; tentou-se devolver o foco ao botão no `onLoad`, mas o leitor volta a tomá-lo meio segundo depois); confirmar também o arrastar-e-largar e o envio com `Content-Length` num browser real.
 - Fica para o Plano 3: o ecrã da lixeira. Até lá, «Excluir» num ficheiro só o manda para a lixeira e o espaço não é libertado.
 
-**Plano 3 (lixeira, pesquisa, partilha)**
-- Decrementos de quota com `MAX(used_bytes - ?, 0)`, para um desvio de contabilidade não fazer falhar a `batch` para sempre.
-- Testes de `shares` (`token_hash` único, `ON DELETE CASCADE` de `file_id`).
-- Novo (revisão final do 2A): montar o `jsonBodyLimit` por construção (global em `/api/*`, exceto `PUT /api/files`), em vez de rota a rota.
-- Novo: na pesquisa, calcular os caminhos dos até 50 resultados numa só consulta (nunca um `breadcrumbFor` por resultado: o limite do plano gratuito é 50 subpedidos por invocação).
-- Novo: nos decrementos de quota, preferir `UPDATE ... WHERE EXISTS (linha)` antes do `DELETE` a depender de `changes()` entre instruções da `batch`.
-- Novo: extrair de `routes/files.ts` os helpers de servir ficheiros (cabeçalhos e `missingObject`; o `parseRange` já está em `lib/files.ts`) para o descarregamento público.
-- Novo: no restauro com sufixo, respeitar o limite de 255 e as linhas `pending`.
-- Novo (revisão final do 2B): extrair o código comum de `FolderActions`/`FileActions` quando entrar «Partilhar»; dividir o contexto dos envios (itens e ações) para a lista não re-renderizar a cada evento de progresso; um refresh por ficheiro enviado (agrupar quando a fila fica ociosa).
-- Novo: a mensagem `name_taken` dos ficheiros está duplicada em dois literais (`routes/files.ts`) e a do `PATCH` não tem teste; faltam testes de isolamento entre utilizadores de `subtreeHeight`, de profundidade com árvores que não são cadeias, e do ramo `depth >= MAX_FOLDER_DEPTH` do `UPDATE_FOLDER_SQL` (deixou de ter teste quando `assertFitsBelow` passou à frente; cobre-se com `patchWithRace`); `breadcrumbFor` corre duas vezes por movimento; faltam testes dos hooks `useDeleteFolder`/`useUpdateFile`; `formatDate` com `NaN`.
-- Novo: se outro separador do mesmo browser termina a sessão e entra com outra conta, a fila de um separador antigo pode enviar ficheiros da raiz para a conta nova (a fila só se cancela quando o `me` desse separador muda de utilizador): solução robusta com `BroadcastChannel` ou com verificação do dono do envio no servidor.
-- Novo: «Sair» com envios em curso cancela-os em silêncio: avisar antes.
+**Plano 3 (lixeira, pesquisa, partilha): a API ficou no Plano 3A; a interface é o Plano 3B**
+- Resolvido no 3A: decrementos de quota com `MAX(used_bytes - ?, 0)` e, ao desfazer uma reserva, `UPDATE ... WHERE EXISTS` antes do `DELETE` (sem depender de `changes()`); testes de `shares` (`token_hash` único, `ON DELETE CASCADE`); o limite do corpo (64 KiB) montado em `/api/*`, menos o upload; os caminhos dos resultados da pesquisa e da lixeira numa só consulta por bloco de 50 pastas (`pathsForFolders`); os ajudantes de servir ficheiros em `lib/serve.ts`; o restauro com sufixo (respeita os 255 caracteres e as linhas `pending`); a mensagem `name_taken` dos ficheiros numa só função, com teste; testes de isolamento de `subtreeHeight`, de pastas largas e da guarda do `UPDATE_FOLDER_SQL`.
+- Para o 3B (interface): esvaziar a lixeira repete `DELETE /api/trash` até `remaining` ser 0 (ou `purged` ser 0); a lixeira lista no máximo 200 (`total` conta todos); o link completo só se mostra uma vez, na criação (`token` da resposta de `POST /api/files/:id/shares`); extrair o código comum de `FolderActions`/`FileActions` quando entrar «Partilhar»; dividir o contexto dos envios (itens e ações) para a lista não re-renderizar a cada evento de progresso; um refresh por ficheiro enviado (agrupar quando a fila fica ociosa); «Sair» com envios em curso cancela-os em silêncio: avisar antes; faltam testes dos hooks `useDeleteFolder`/`useUpdateFile`; `formatDate` com `NaN`.
+- Fica sem plano: `breadcrumbFor` corre duas vezes por movimento de pasta (uma em `wouldCreateCycle` e outra em `assertFitsBelow`); se outro separador do mesmo browser termina a sessão e entra com outra conta, a fila de um separador antigo pode enviar ficheiros da raiz para a conta nova (solução robusta com `BroadcastChannel` ou com verificação do dono do envio no servidor).
 
 **Plano 4 (admin e manutenção)**
 - Suspender uma conta tem de **apagar as suas sessões** (o filtro por `status` não chega: ao reativar, as sessões antigas voltariam a valer).
@@ -68,6 +60,7 @@ Resultado da revisão final do ramo do Plano 1 (achados diferidos de propósito)
 - Novo: índice parcial `files (created_at) WHERE status = 'pending'`.
 - Novo: apagar os objetos de uma conta pelo prefixo `u/<userId>/` (apanha também os órfãos de `releaseReservation`).
 - Novo: as pastas de uma conta apagam-se com um só `DELETE ... WHERE user_id = ?`, depois dos ficheiros.
+- Novo (3A): o cron da lixeira usa `purgeTrashed` (`lib/trash.ts`, no máximo 50 ficheiros por chamada), que já desconta a quota e tira os objetos do R2; se o R2 falhar o objeto fica órfão e só aparece no registo (a varredura pelo prefixo `u/<userId>/` também os apanha). O cron apaga ainda as partilhas revogadas ou expiradas há mais de 30 dias (as de ficheiros eliminados saem em cascata).
 
 **Plano 5 (deploy)**
 - Medir o CPU do PBKDF2 no plano gratuito (10 ms): login, registo e troca de senha (esta faz 2 PBKDF2); trocar `getDummyHash` por uma constante pré-calculada; ativar `observability`.
