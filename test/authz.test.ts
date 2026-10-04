@@ -14,6 +14,8 @@ const PUBLIC_ROUTES = new Set([
   "POST /api/auth/register",
   "POST /api/auth/login",
   "POST /api/auth/logout",
+  "GET /api/public/shares/:token",
+  "GET /api/public/shares/:token/download",
 ]);
 
 describe("todas as rotas privadas exigem sessão", () => {
@@ -67,5 +69,27 @@ describe("isolamento entre utilizadores", () => {
     expect(contents.files.map((f) => f.name)).toEqual(["da-ana.png"]);
     const download = await api(`/api/files/${ficheiro.id}/download`, { cookie: ana.cookie });
     expect(await download.text()).toBe("segredo");
+  });
+});
+
+describe("isolamento das partilhas", () => {
+  it("o Bob não cria, lista nem revoga links da Ana, e o Bob não vê nada da Ana pela rota pública sem o token", async () => {
+    const ana = await registerUser("ana@example.com");
+    const bob = await registerUser("bob@example.com");
+    const ficheiro = await uploadOk(ana.cookie, "da-ana.txt", "segredo");
+    const created = await api(`/api/files/${ficheiro.id}/shares`, { method: "POST", cookie: ana.cookie, json: {} });
+    const { share } = (await created.json()) as { share: { id: string } };
+
+    const attempts: Array<[string, string, unknown?]> = [
+      ["POST", `/api/files/${ficheiro.id}/shares`, {}],
+      ["GET", `/api/files/${ficheiro.id}/shares`],
+      ["DELETE", `/api/shares/${share.id}`],
+    ];
+    for (const [method, path, json] of attempts) {
+      const res = await api(path, { method, cookie: bob.cookie, json });
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+    const mine = await api(`/api/files/${ficheiro.id}/shares`, { cookie: ana.cookie });
+    expect(((await mine.json()) as { shares: unknown[] }).shares).toHaveLength(1);
   });
 });
