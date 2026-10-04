@@ -2,15 +2,22 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { FileItem } from "../src/shared/types";
 import { registerUser } from "./auth-helpers";
+import { dbWithStatementHook, fetchWithEnv } from "./db-helpers";
 import { uploadOk, usedBytes } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
-import { api, resetState } from "./helpers";
+import { api, buildRequest, resetState } from "./helpers";
 
 beforeEach(resetState);
 
 const patch = (cookie: string, id: string, json: unknown) =>
   api(`/api/files/${id}`, { method: "PATCH", cookie, json });
 const remove = (cookie: string, id: string) => api(`/api/files/${id}`, { method: "DELETE", cookie });
+
+/** PATCH de ficheiro com `DB` em Proxy: `before` corre imediatamente antes do `UPDATE files` do pedido. */
+function patchWithRace(cookie: string, id: string, json: unknown, before: () => Promise<void>) {
+  const racingDb = dbWithStatementHook(/^\s*UPDATE files SET/, before);
+  return fetchWithEnv(buildRequest(`/api/files/${id}`, { method: "PATCH", cookie, json }), { DB: racingDb });
+}
 
 describe("PATCH /api/files/:id (renomear)", () => {
   it("renomeia, normaliza o nome e não mexe no conteúdo nem na chave do R2", async () => {
@@ -87,6 +94,37 @@ describe("PATCH /api/files/:id (mover)", () => {
     const file = await uploadOk(cookie, "a.txt", "x");
     const res = await patch(cookie, file.id, { name: "novo.txt", folderId: docs.id });
     expect(((await res.json()) as { file: FileItem }).file).toMatchObject({ name: "novo.txt", folderId: docs.id });
+  });
+});
+
+describe("PATCH /api/files/:id: corridas entre pedidos do mesmo utilizador", () => {
+  it("mover não regrava o nome antigo: um rename concorrente fica", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const docs = await createFolder(cookie, "Docs");
+    const file = await uploadOk(cookie, "a.txt", "x");
+    const res = await patchWithRace(cookie, file.id, { folderId: docs.id }, async () => {
+      await env.DB.prepare("UPDATE files SET name = 'novo.txt', name_norm = 'novo.txt' WHERE id = ?1")
+        .bind(file.id)
+        .run();
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { file: FileItem }).file).toMatchObject({ name: "novo.txt", folderId: docs.id });
+    const row = await env.DB.prepare("SELECT name, name_norm, folder_id FROM files WHERE id = ?1")
+      .bind(file.id)
+      .first();
+    expect(row).toEqual({ name: "novo.txt", name_norm: "novo.txt", folder_id: docs.id });
+  });
+
+  it("renomear não regrava a pasta antiga: um movimento concorrente fica", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const docs = await createFolder(cookie, "Docs");
+    const file = await uploadOk(cookie, "a.txt", "x");
+    const res = await patchWithRace(cookie, file.id, { name: "novo.txt" }, async () => {
+      await env.DB.prepare("UPDATE files SET folder_id = ?1 WHERE id = ?2").bind(docs.id, file.id).run();
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { file: FileItem }).file).toMatchObject({ name: "novo.txt", folderId: docs.id });
+    expect((await getContents(cookie, docs.id)).files.map((f) => f.name)).toEqual(["novo.txt"]);
   });
 });
 

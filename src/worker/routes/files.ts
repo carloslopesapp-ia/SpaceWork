@@ -216,7 +216,11 @@ files.get("/:id/preview", async (c) => {
   return new Response(object.body, { headers });
 });
 
-/** Renomeia e/ou move um ficheiro (`folderId: null` ou "root" = raiz). Só mexe na D1: a chave do R2 não muda. */
+/**
+ * Renomeia e/ou move um ficheiro (`folderId: null` ou "root" = raiz). Só mexe na D1: a chave do R2 não muda.
+ * O `UPDATE` só grava as colunas pedidas (um pedido concorrente do mesmo utilizador não é desfeito) e a
+ * resposta vem de uma releitura depois dele.
+ */
 files.patch("/:id", jsonBodyLimit, async (c) => {
   const db = c.env.DB;
   const userId = c.get("user").id;
@@ -228,18 +232,19 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
     throw new ApiError(400, "invalid_body", "Indique o novo nome e/ou a nova pasta.");
   }
 
-  const name = hasName ? parseName(readString(body, "name")) : file.name;
-  const folderId = hasFolder ? parseFolderRef(body.folderId) : file.folderId;
-  if (hasFolder && folderId !== null) await requireFolder(db, userId, folderId);
+  const name = hasName ? parseName(readString(body, "name")) : null;
+  const folderId = hasFolder ? parseFolderRef(body.folderId) : null;
+  if (folderId !== null) await requireFolder(db, userId, folderId);
 
   let updated;
   try {
     updated = await db
       .prepare(
-        `UPDATE files SET name = ?1, name_norm = ?2, folder_id = ?3
-         WHERE id = ?4 AND user_id = ?5 AND status = 'ready' AND deleted_at IS NULL`,
+        `UPDATE files SET name = COALESCE(?1, name), name_norm = COALESCE(?2, name_norm),
+           folder_id = CASE WHEN ?3 = 1 THEN ?4 ELSE folder_id END
+         WHERE id = ?5 AND user_id = ?6 AND status = 'ready' AND deleted_at IS NULL`,
       )
-      .bind(name, searchKey(name), folderId, file.id, userId)
+      .bind(name, name === null ? null : searchKey(name), hasFolder ? 1 : 0, folderId, file.id, userId)
       .run();
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -253,7 +258,7 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
   if (updated.meta.changes !== 1) {
     throw new ApiError(404, "file_not_found", "Ficheiro não encontrado.");
   }
-  return c.json({ file: { ...toFileItem(file), name, folderId } });
+  return c.json({ file: toFileItem(await requireFile(db, userId, file.id)) });
 });
 
 /**
