@@ -85,6 +85,20 @@ export class UploadManager {
     }
   };
 
+  /**
+   * Cancela tudo: tira da fila os ficheiros em espera e aborta os envios em curso (todos desaparecem da lista), para que
+   * uma fila órfã (o provider foi desmontado, por exemplo no fim da sessão) não continue a enviar ficheiros.
+   */
+  cancelAll = (): void => {
+    // Primeiro os que esperam: cada `abort` acaba em `finish` -> `pump()`, que senão arrancava um deles.
+    const waiting = this.items.filter((item) => item.status === "queued");
+    if (waiting.length > 0) {
+      for (const item of waiting) this.files.delete(item.id);
+      this.set(this.items.filter((item) => item.status !== "queued"));
+    }
+    for (const handle of [...this.handles.values()]) handle.abort();
+  };
+
   /** Tira da lista os envios terminados (com êxito ou com erro). */
   clearFinished = (): void => {
     const running = this.items.filter((item) => item.status === "queued" || item.status === "uploading");

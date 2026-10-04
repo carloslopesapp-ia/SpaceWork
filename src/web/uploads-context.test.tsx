@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { act } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { useMe } from "./auth";
 import { useConfig } from "./space";
@@ -33,6 +33,8 @@ const isBlocked = () => {
   window.dispatchEvent(event);
   return event.defaultPrevented;
 };
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("UploadsProvider", () => {
   it("envia, mostra o estado e, quando termina, atualiza o espaço usado", async () => {
@@ -73,5 +75,19 @@ describe("UploadsProvider", () => {
 
   it("`useUploads` fora do provider é um erro claro", () => {
     expect(() => renderHook(() => useUploads())).toThrow("UploadsProvider");
+  });
+
+  it("ao desmontar o provider (logout, erro de sessão) aborta os envios em curso e não arranca os que esperavam", async () => {
+    const { hook, Xhr } = setup();
+    const abort = vi.spyOn(Xhr.prototype, "abort");
+    act(() => hook.result.current.uploads.add(["a", "b", "c", "d"].map((name) => new File(["abc"], `${name}.txt`)), null));
+    expect(Xhr.instances).toHaveLength(3);
+    expect(abort).not.toHaveBeenCalled();
+
+    hook.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(abort).toHaveBeenCalledTimes(3);
+    expect(Xhr.instances).toHaveLength(3); // o 4.º ficheiro, em espera, não arrancou
   });
 });

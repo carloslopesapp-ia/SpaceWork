@@ -154,4 +154,28 @@ describe("UploadManager", () => {
     await flush();
     expect(statuses(manager)).toEqual(["a:done", "b:uploading", "c:uploading", "d:uploading"]); // o 4.º arrancou apesar do erro
   });
+
+  it("cancelAll aborta o que está a decorrer, tira o que espera e nada arranca depois", async () => {
+    const { manager, sent, onSettled } = setup();
+    manager.add(["a", "b", "c", "d"].map((name) => file(name)), null);
+    expect(sent).toHaveLength(3);
+
+    manager.cancelAll();
+    await flush();
+
+    expect(sent.map((s) => s.aborted)).toEqual([true, true, true]);
+    expect(manager.getSnapshot()).toEqual([]);
+    expect(sent).toHaveLength(3); // o 4.º, que estava em espera, não arrancou quando os outros foram abortados
+    expect(onSettled).toHaveBeenCalledTimes(3); // só os abortados avisam; o que esperava nunca chegou a enviar
+  });
+
+  it("cancelAll numa fila vazia não faz nada nem lança", () => {
+    const { manager, sent } = setup();
+    const listener = vi.fn();
+    manager.subscribe(listener);
+    expect(() => manager.cancelAll()).not.toThrow();
+    expect(listener).not.toHaveBeenCalled();
+    expect(manager.getSnapshot()).toEqual([]);
+    expect(sent).toHaveLength(0);
+  });
 });

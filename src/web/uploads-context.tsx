@@ -40,6 +40,8 @@ export function UploadsProvider({ children }: { children: ReactNode }) {
         onSettled: () => void latest.current.refresh(),
       }),
   );
+  // Se o provider desaparece (fim de sessão, erro), a fila não pode continuar a enviar ficheiros às escondidas.
+  useEffect(() => () => manager.cancelAll(), [manager]);
   const items = useSyncExternalStore(manager.subscribe, manager.getSnapshot);
   const busy = items.some((item) => item.status === "queued" || item.status === "uploading");
 

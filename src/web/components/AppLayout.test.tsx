@@ -1,7 +1,8 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NETWORK_ERROR_MESSAGE } from "../api";
+import { ME_KEY } from "../auth";
 import { apiError, json, ME, mockApi, noContent } from "../test/mock-api";
 import { renderApp } from "../test/render";
 
@@ -70,5 +71,22 @@ describe("AppLayout", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Sair" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
+  });
+
+  it("um refetch da sessão que falha em segundo plano não deita abaixo a aplicação nem mostra o erro", async () => {
+    let failing = false;
+    mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": () => (failing ? apiError(500, "internal_error", "Erro interno do servidor.") : json({ user: ME })),
+    });
+    const { client } = renderApp("/");
+    expect(await screen.findByRole("navigation", { name: "Principal" })).toBeInTheDocument();
+
+    failing = true;
+    await act(() => client.invalidateQueries({ queryKey: ME_KEY }));
+
+    expect(client.getQueryState(ME_KEY)?.status).toBe("error"); // o refetch falhou mesmo
+    expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

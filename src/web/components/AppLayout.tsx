@@ -20,7 +20,8 @@ export default function AppLayout() {
   const { pathname } = useLocation();
 
   if (me.isPending) return <p className="p-8 text-slate-500">A carregar…</p>;
-  if (me.isError) {
+  // Só quando ainda não há dados: um refetch falhado em segundo plano não pode desmontar a aplicação (e a fila de envios).
+  if (me.isError && me.data === undefined) {
     return (
       <div className="max-w-md space-y-4 p-8">
         <Message kind="error">{errorMessage(me.error)}</Message>
