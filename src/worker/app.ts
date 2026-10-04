@@ -4,6 +4,7 @@ import { ApiError } from "./errors";
 import { jsonBodyLimit } from "./middleware/body-limit";
 import { originCheck, securityHeaders } from "./middleware/security";
 import { auth } from "./routes/auth";
+import { clientConfig } from "./routes/config";
 import { files } from "./routes/files";
 import { folders } from "./routes/folders";
 import type { AppEnv } from "./types";
@@ -21,6 +22,7 @@ app.get("/api/health", async (c) => {
 });
 
 app.route("/api/auth", auth);
+app.route("/api/config", clientConfig);
 app.route("/api/folders", folders);
 app.route("/api/files", files);
 

@@ -129,7 +129,10 @@ describe("PUT /api/files (upload)", () => {
     await uploadOk(cookie, "a.txt", "12345");
     const dup = await uploadFile(cookie, "a.txt", "999");
     expect(dup.status).toBe(409);
-    expect(await dup.json()).toMatchObject({ error: "name_taken" });
+    expect(await dup.json()).toMatchObject({
+      error: "name_taken",
+      message: expect.stringContaining("em curso"),
+    });
     expect(await usedBytes(cookie)).toBe(5);
     expect(await countFiles()).toBe(1);
     expect((await env.FILES.list({ prefix: "u/" })).objects).toHaveLength(1);

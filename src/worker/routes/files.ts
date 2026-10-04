@@ -1,12 +1,12 @@
 import { formatBytes } from "../../shared/format";
 import { searchKey } from "../../shared/names";
+import { previewContentType } from "../../shared/preview";
 import type { FileItem } from "../../shared/types";
 import { getConfig } from "../config";
 import { ApiError, rethrowConstraint } from "../errors";
 import {
   contentDisposition,
   parseRange,
-  previewContentType,
   r2KeyFor,
   requireFile,
   sanitizeMime,
@@ -85,7 +85,7 @@ files.put("/", async (c) => {
     ]);
   } catch (error) {
     rethrowConstraint(error, {
-      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local."),
+      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local (pode ser um envio ainda em curso)."),
       // A pasta foi apagada entre a verificação e a reserva.
       foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
     });
@@ -238,7 +238,7 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
       .run();
   } catch (error) {
     rethrowConstraint(error, {
-      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local."),
+      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local (pode ser um envio ainda em curso)."),
       // O destino foi apagado entre a verificação e o UPDATE.
       foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
     });

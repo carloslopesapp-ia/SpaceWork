@@ -3,6 +3,7 @@ import type { FolderContents, FolderItem } from "../../shared/types";
 import { ApiError, isForeignKeyViolation, rethrowConstraint } from "../errors";
 import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
 import {
+  assertFitsBelow,
   breadcrumbFor,
   FOLDER_COLUMNS,
   parseFolderRef,
@@ -67,7 +68,10 @@ folders.post("/", async (c) => {
   const body = await readJsonObject(c);
   const name = parseName(readString(body, "name"));
   const parentId = parseFolderRef(body.parentId);
-  if (parentId !== null) await requireFolder(db, userId, parentId);
+  if (parentId !== null) {
+    await requireFolder(db, userId, parentId);
+    await assertFitsBelow(db, userId, parentId);
+  }
 
   const id = crypto.randomUUID();
   const createdAt = Date.now();
@@ -115,6 +119,7 @@ folders.patch("/:id", async (c) => {
   if (parentId !== null) {
     await requireFolder(db, userId, parentId);
     if (await wouldCreateCycle(db, userId, folder.id, parentId)) throw invalidMove;
+    await assertFitsBelow(db, userId, parentId, folder.id);
   }
 
   let updated;

@@ -109,7 +109,8 @@ describe("PATCH /api/folders/:id: corridas entre pedidos", () => {
 
     const move = await api(`/api/folders/${c.id}`, { method: "PATCH", cookie, json: { parentId: a.id } });
     expect(move.status).toBe(400);
-    expect(await move.json()).toMatchObject({ error: "invalid_move" });
+    // O ciclo vê-se como uma cadeia sem fim: o limite de profundidade responde antes do UPDATE.
+    expect(await move.json()).toMatchObject({ error: "folder_too_deep" });
     expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["C"]);
   });
 });

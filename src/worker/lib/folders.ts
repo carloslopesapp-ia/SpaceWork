@@ -100,3 +100,42 @@ export const UPDATE_FOLDER_SQL = `
         SELECT f.parent_id, a.depth + 1 FROM folders f JOIN anc a ON f.id = a.id
         WHERE f.user_id = ?6 AND f.parent_id IS NOT NULL AND a.depth < ${MAX_FOLDER_DEPTH})
       SELECT 1 FROM anc WHERE id = ?5 OR depth >= ${MAX_FOLDER_DEPTH}))`;
+
+/** Profundidade máxima das pastas do utilizador (as da raiz estão no nível 1). */
+export const MAX_NESTING = 100;
+
+/** Número de níveis de uma pasta contando com as suas descendentes (1 = sem subpastas). */
+async function subtreeHeight(db: D1Database, userId: string, folderId: string): Promise<number> {
+  const row = await db
+    .prepare(
+      `WITH RECURSIVE sub(id, depth) AS (
+         SELECT id, 1 FROM folders WHERE id = ?1 AND user_id = ?2
+         UNION ALL
+         SELECT f.id, s.depth + 1 FROM folders f JOIN sub s ON f.parent_id = s.id
+         WHERE f.user_id = ?2 AND s.depth < ${MAX_FOLDER_DEPTH}
+       )
+       SELECT MAX(depth) AS height FROM sub`,
+    )
+    .bind(folderId, userId)
+    .first<{ height: number | null }>();
+  return row?.height ?? 1;
+}
+
+/**
+ * Garante que uma pasta nova (ou, com `movingFolderId`, a pasta movida com tudo o que tem dentro) cabe por baixo
+ * de `parentId` sem passar de `MAX_NESTING` níveis. A raiz (`null`) nunca é recusada. É uma verificação à parte
+ * da escrita: dois pedidos em paralelo podem passar o limite por poucos níveis.
+ */
+export async function assertFitsBelow(
+  db: D1Database,
+  userId: string,
+  parentId: string | null,
+  movingFolderId?: string,
+): Promise<void> {
+  if (parentId === null) return;
+  const height = movingFolderId === undefined ? 1 : await subtreeHeight(db, userId, movingFolderId);
+  const depth = (await breadcrumbFor(db, userId, parentId)).length;
+  if (depth + height > MAX_NESTING) {
+    throw new ApiError(400, "folder_too_deep", `As pastas não podem ter mais de ${MAX_NESTING} níveis de profundidade.`);
+  }
+}

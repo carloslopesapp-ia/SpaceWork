@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NAME_MAX_LENGTH, normalizeName, searchKey, validateName } from "../src/shared/names";
 
 // Os nomes com acentos decompostos (NFD) escrevem-se com escapes: um editor podia compô-los sem avisar.
-const RELATORIO_NFD = "Relatório"; // o + acento agudo combinado
+const RELATORIO_NFD = "Relato\u0301rio"; // o + acento agudo combinado
 const RELATORIO_NFC = "Relatório"; // ó
 
 describe("normalizeName", () => {
@@ -13,10 +13,10 @@ describe("normalizeName", () => {
   });
 
   it("o trim também tira o NBSP e o BOM das pontas, mas não do meio (comportamento atual)", () => {
-    expect(normalizeName(" a﻿")).toBe("a");
-    expect(normalizeName(" a ")).toBe("a");
-    expect(normalizeName("a b")).toBe("a b");
-    expect(validateName(normalizeName("a b"))).toBeNull();
+    expect(normalizeName(" a\ufeff")).toBe("a");
+    expect(normalizeName("\u00a0a\u00a0")).toBe("a");
+    expect(normalizeName("a\u00a0b")).toBe("a\u00a0b");
+    expect(validateName(normalizeName("a\u00a0b"))).toBeNull();
   });
 });
 
@@ -58,14 +58,14 @@ describe("validateName", () => {
     expect(validateName("a b")).toBeNull(); // U+0020, o espaço
     expect(validateName("a\u0080b")).toMatch(/controlo/); // primeiro C1
     expect(validateName("a\u009fb")).toMatch(/controlo/); // último C1
-    expect(validateName("a b")).toBeNull(); // U+00A0, o NBSP
+    expect(validateName("a\u00a0b")).toBeNull(); // U+00A0, o NBSP
   });
 
   it("rejeita os controlos de direção do texto (um nome como 'ab\\u202etxt.exe' apareceria no ecrã como 'abexe.txt')", () => {
-    for (const char of ["؜", "‎", "‏", "‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩"]) {
+    for (const char of ["\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"]) {
       expect(validateName(`ab${char}txt.exe`), `U+${char.codePointAt(0)?.toString(16)}`).toMatch(/controlo/);
     }
-    expect(validateName("a‍b")).toBeNull(); // o ZWJ (emojis compostos) não é um controlo de direção
+    expect(validateName("a\u200db")).toBeNull(); // o ZWJ (emojis compostos) não é um controlo de direção
   });
 
   it("rejeita surrogates isolados (a D1 gravava-os como U+FFFD) e aceita pares válidos", () => {

@@ -75,24 +75,6 @@ export function toFileItem(file: StoredFile): FileItem {
   return item;
 }
 
-// Só estes tipos abrem dentro da app. SVG e HTML ficam de fora de propósito: executariam código no nosso domínio.
-const PREVIEW_TYPES: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  pdf: "application/pdf",
-};
-
-/** Content-Type fixo para a pré-visualização, decidido pela extensão do nome; null se não for permitida. */
-export function previewContentType(name: string): string | null {
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return null; // sem extensão, ou um ficheiro escondido como ".png"
-  const extension = name.slice(dot + 1).toLowerCase();
-  return Object.hasOwn(PREVIEW_TYPES, extension) ? PREVIEW_TYPES[extension] : null;
-}
-
 /** `Content-Disposition` com `filename` ASCII de recurso e `filename*` em UTF-8 (RFC 5987). */
 export function contentDisposition(type: "attachment" | "inline", filename: string): string {
   const fallback = filename.replace(/[^\x20-\x7e]|["\\%]/g, "_");

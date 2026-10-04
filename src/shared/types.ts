@@ -43,3 +43,9 @@ export interface FolderContents {
   folders: FolderItem[];
   files: FileItem[];
 }
+
+/** Limites do servidor que o browser precisa de conhecer (`GET /api/config`). */
+export interface ClientConfig {
+  /** Tamanho máximo de um ficheiro, em bytes. */
+  maxUploadBytes: number;
+}
