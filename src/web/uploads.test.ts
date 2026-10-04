@@ -141,4 +141,17 @@ describe("UploadManager", () => {
     manager.clearFinished();
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("um onSettled que lança não pára a fila: os itens em espera arrancam na mesma", async () => {
+    const fake = fakeUploads();
+    const onSettled = vi.fn(() => {
+      throw new Error("Falha ao atualizar quota");
+    });
+    const manager = new UploadManager({ maxUploadBytes: () => Infinity, onSettled, upload: fake.upload });
+    manager.add(["a", "b", "c", "d"].map((name) => file(name)), null);
+    expect(statuses(manager)).toEqual(["a:uploading", "b:uploading", "c:uploading", "d:queued"]);
+    fake.sent[0].finish(); // o 1.º termina e onSettled lança
+    await flush();
+    expect(statuses(manager)).toEqual(["a:done", "b:uploading", "c:uploading", "d:uploading"]); // o 4.º arrancou apesar do erro
+  });
 });

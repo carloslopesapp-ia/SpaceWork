@@ -130,7 +130,14 @@ export class UploadManager {
     const before = this.items.find((item) => item.id === id);
     if (changes === null) this.set(this.items.filter((item) => item.id !== id));
     else this.update(id, changes);
-    if (before) this.options.onSettled({ ...before, ...changes });
-    this.pump();
+    try {
+      if (before) this.options.onSettled({ ...before, ...changes });
+    } catch {
+      // Um aviso de atualização falhado não deve parar a fila: a atualização de quota ou
+      // listagem é secundária ao progresso do envio. Engolir o erro aqui evita uma promessa
+      // rejeitada não tratada e garante que a fila continua com os itens seguintes.
+    } finally {
+      this.pump();
+    }
   }
 }
