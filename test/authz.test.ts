@@ -7,24 +7,30 @@ import { api, resetState } from "./helpers";
 
 beforeEach(resetState);
 
-describe("todas as rotas privadas exigem sessão", () => {
-  it("devolve 401 sem cookie em cada rota registada de pastas e ficheiros", async () => {
-    const routes = app.routes.filter(
-      (route) =>
-        route.method !== "ALL" &&
-        (route.path.startsWith("/api/folders") || route.path.startsWith("/api/files")),
-    );
-    expect(routes.length).toBeGreaterThanOrEqual(11); // falha se o filtro deixar de apanhar as rotas
-    for (const route of routes) {
-      const path = route.path.replace(/:\w+/g, "x");
-      const res = await api(path, { method: route.method, json: route.method === "GET" ? undefined : {} });
-      expect(res.status, `${route.method} ${route.path}`).toBe(401);
-    }
-  });
+// As únicas rotas que não exigem sessão. Qualquer outra rota registada em `app` (seja qual for o prefixo, mesmo
+// um router criado com `new Hono()` em vez de `createAuthedRouter()`) tem de dar 401 sem cookie.
+const PUBLIC_ROUTES = new Set([
+  "GET /api/health",
+  "POST /api/auth/register",
+  "POST /api/auth/login",
+  "POST /api/auth/logout",
+]);
 
-  it("e também as rotas privadas de autenticação", async () => {
-    expect((await api("/api/auth/me")).status).toBe(401);
-    expect((await api("/api/auth/password", { method: "POST", json: {} })).status).toBe(401);
+describe("todas as rotas privadas exigem sessão", () => {
+  it("devolve 401 sem cookie em cada rota registada, exceto as públicas", async () => {
+    // O middleware de uma rota (ex.: o limite do corpo no PATCH) aparece como uma entrada repetida: deduplica-se.
+    const registered = new Map<string, { method: string; path: string }>();
+    for (const { method, path } of app.routes) {
+      if (method !== "ALL") registered.set(`${method} ${path}`, { method, path });
+    }
+    for (const key of PUBLIC_ROUTES) expect(registered.has(key), `${key} já não existe: tirá-la da lista`).toBe(true);
+
+    const privateRoutes = [...registered].filter(([key]) => !PUBLIC_ROUTES.has(key));
+    expect(privateRoutes.length).toBeGreaterThan(0); // falha se a varredura deixar de apanhar rotas
+    for (const [key, { method, path }] of privateRoutes) {
+      const res = await api(path.replace(/:\w+/g, "x"), { method, json: method === "GET" ? undefined : {} });
+      expect(res.status, key).toBe(401);
+    }
   });
 });
 

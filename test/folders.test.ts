@@ -69,6 +69,32 @@ describe("POST /api/folders", () => {
     expect((await getContents(cookie)).folders).toHaveLength(2);
   });
 
+  it("aceita parentId 'root' ou null para a raiz e recusa um parentId que não é texto (400 invalid_body)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const viaRoot = await api("/api/folders", { method: "POST", cookie, json: { name: "A", parentId: "root" } });
+    expect(viaRoot.status).toBe(201);
+    expect(((await viaRoot.json()) as { folder: FolderItem }).folder.parentId).toBeNull();
+    expect((await api("/api/folders", { method: "POST", cookie, json: { name: "B", parentId: null } })).status).toBe(201);
+    expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["A", "B"]);
+
+    const bad = await api("/api/folders", { method: "POST", cookie, json: { name: "C", parentId: 5 } });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid_body" });
+  });
+
+  it("recusa um corpo que não é um objeto JSON (400 invalid_body) e um corpo acima de 64 KiB (413)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    for (const json of ["texto", [1, 2], null, 5]) {
+      const res = await api("/api/folders", { method: "POST", cookie, json });
+      expect(res.status, JSON.stringify(json)).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_body" });
+    }
+    const big = await api("/api/folders", { method: "POST", cookie, json: { name: "a".repeat(70 * 1024) } });
+    expect(big.status).toBe(413);
+    expect(await big.json()).toMatchObject({ error: "payload_too_large" });
+    expect((await getContents(cookie)).folders).toEqual([]);
+  });
+
   it("devolve 404 se a pasta-mãe não existir ou for de outro utilizador", async () => {
     const ana = await registerUser("ana@example.com");
     const bob = await registerUser("bob@example.com");

@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { r2KeyFor } from "../src/worker/lib/files";
 import { registerUser } from "./auth-helpers";
+import { silenceErrors } from "./db-helpers";
 import { bodyText, uploadOk } from "./file-helpers";
 import { api, resetState } from "./helpers";
 
 beforeEach(resetState);
+afterEach(() => vi.restoreAllMocks());
 
 async function trash(fileId: string): Promise<void> {
   await env.DB.prepare("UPDATE files SET deleted_at = 5 WHERE id = ?1").bind(fileId).run();
@@ -64,16 +67,19 @@ describe("GET /api/files/:id/download", () => {
     for (const id of ["nao-existe", doBob.id, naLixeira.id, "p1"]) {
       const res = await api(`/api/files/${id}/download`, { cookie: ana.cookie });
       expect(res.status, id).toBe(404);
+      expect(await res.json(), id).toMatchObject({ error: "file_not_found" });
     }
   });
 
   it("devolve 404 file_missing quando a linha existe mas o objeto desapareceu do R2", async () => {
+    const errors = silenceErrors();
     const { cookie, user } = await registerUser("ana@example.com");
     const file = await uploadOk(cookie, "a.txt", "x");
-    await env.FILES.delete(`u/${user.id}/${file.id}`);
+    await env.FILES.delete(r2KeyFor(user.id, file.id));
     const res = await api(`/api/files/${file.id}/download`, { cookie });
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "file_missing" });
+    expect(errors).toHaveBeenCalledWith(`O ficheiro ${file.id} existe na D1 mas não tem objeto no R2.`);
   });
 
   it("exige sessão", async () => {

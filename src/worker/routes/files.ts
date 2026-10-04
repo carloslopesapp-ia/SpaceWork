@@ -1,5 +1,6 @@
 import { formatBytes } from "../../shared/format";
 import { searchKey } from "../../shared/names";
+import type { FileItem } from "../../shared/types";
 import { getConfig } from "../config";
 import { ApiError, rethrowConstraint } from "../errors";
 import {
@@ -104,7 +105,7 @@ files.put("/", async (c) => {
     throw error;
   }
 
-  return c.json({ file: { id, name, folderId, size, mime, createdAt } }, 201);
+  return c.json({ file: { id, name, folderId, size, mime, createdAt } satisfies FileItem }, 201);
 });
 
 /**
@@ -243,7 +244,7 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
   if (updated.meta.changes !== 1) {
     throw new ApiError(404, "file_not_found", "Ficheiro não encontrado.");
   }
-  return c.json({ file: toFileItem(await requireFile(db, userId, file.id)) });
+  return c.json({ file: toFileItem(await requireFile(db, userId, file.id)) satisfies FileItem });
 });
 
 /**

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { FileItem } from "../src/shared/types";
 import { registerUser } from "./auth-helpers";
 import { dbWithStatementHook, fetchWithEnv } from "./db-helpers";
-import { uploadOk, usedBytes } from "./file-helpers";
+import { insertFileRow, uploadOk, usedBytes } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
 import { api, buildRequest, resetState } from "./helpers";
 
@@ -40,7 +40,9 @@ describe("PATCH /api/files/:id (renomear)", () => {
     const { cookie } = await registerUser("ana@example.com");
     const a = await uploadOk(cookie, "a.txt", "x");
     await uploadOk(cookie, "b.txt", "x");
-    expect((await patch(cookie, a.id, { name: "a/b" })).status).toBe(400);
+    const invalid = await patch(cookie, a.id, { name: "a/b" });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: "invalid_name" });
     const dup = await patch(cookie, a.id, { name: "b.txt" });
     expect(dup.status).toBe(409);
     expect(await dup.json()).toMatchObject({ error: "name_taken" });
@@ -54,6 +56,39 @@ describe("PATCH /api/files/:id (renomear)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_name" });
     expect((await getContents(cookie)).files.map((f) => f.name)).toEqual(["a.txt"]);
+  });
+
+  it("recusa um nome que não é texto ({ name: 5 }) e um corpo que não é um objeto (400)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await uploadOk(cookie, "a.txt", "x");
+    const notText = await patch(cookie, a.id, { name: 5 });
+    expect(notText.status).toBe(400);
+    expect(await notText.json()).toMatchObject({ error: "invalid_name" });
+    for (const json of ["texto", [1, 2], null]) {
+      const res = await patch(cookie, a.id, json);
+      expect(res.status, JSON.stringify(json)).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_body" });
+    }
+  });
+
+  it("recusa um corpo acima de 64 KiB (413)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await uploadOk(cookie, "a.txt", "x");
+    const res = await patch(cookie, a.id, { name: "a".repeat(70 * 1024) });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: "payload_too_large" });
+    expect((await getContents(cookie)).files.map((f) => f.name)).toEqual(["a.txt"]);
+  });
+
+  it("devolve 404 para um ficheiro na lixeira ou ainda a ser carregado (pending)", async () => {
+    const { cookie, user } = await registerUser("ana@example.com");
+    const naLixeira = await insertFileRow(user.id, null, { name: "lixo.txt", deletedAt: 5 });
+    const pending = await insertFileRow(user.id, null, { name: "a-meio.txt", status: "pending" });
+    for (const id of [naLixeira, pending]) {
+      const res = await patch(cookie, id, { name: "novo.txt" });
+      expect(res.status, id).toBe(404);
+      expect(await res.json()).toMatchObject({ error: "file_not_found" });
+    }
   });
 
   it("exige name e/ou folderId", async () => {
@@ -95,6 +130,14 @@ describe("PATCH /api/files/:id (mover)", () => {
     await uploadOk(ana.cookie, "a.txt", "outro", { folder: dest.id });
     const clash = await patch(ana.cookie, file.id, { folderId: dest.id });
     expect(clash.status).toBe(409);
+  });
+
+  it("recusa um folderId que não é texto (400 invalid_body)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const file = await uploadOk(cookie, "a.txt", "x");
+    const res = await patch(cookie, file.id, { folderId: 5 });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
   });
 
   it("move e renomeia no mesmo pedido", async () => {

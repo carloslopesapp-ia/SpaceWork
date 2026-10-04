@@ -58,3 +58,27 @@ export async function countFiles(): Promise<number> {
 export async function bodyText(res: Response): Promise<string> {
   return new TextDecoder().decode(await res.arrayBuffer());
 }
+
+/** Insere uma linha em `files` por SQL direto (sem passar pela API); devolve o id. */
+export async function insertFileRow(
+  userId: string,
+  folderId: string | null,
+  options: { name?: string; status?: string; deletedAt?: number | null } = {},
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO files (id, user_id, folder_id, name, name_norm, size, mime, r2_key, status, created_at, deleted_at)
+     VALUES (?1, ?2, ?3, ?4, ?4, 1, 'text/plain', ?5, ?6, 1, ?7)`,
+  )
+    .bind(
+      id,
+      userId,
+      folderId,
+      options.name ?? "a.txt",
+      `u/${userId}/${id}`,
+      options.status ?? "ready",
+      options.deletedAt ?? null,
+    )
+    .run();
+  return id;
+}

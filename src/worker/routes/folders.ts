@@ -1,4 +1,5 @@
 import { searchKey } from "../../shared/names";
+import type { FolderContents, FolderItem } from "../../shared/types";
 import { ApiError, isForeignKeyViolation, rethrowConstraint } from "../errors";
 import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
 import {
@@ -57,7 +58,7 @@ folders.get("/:id/contents", async (c) => {
     breadcrumb,
     folders: subfolders.results.map(rowToFolder),
     files: files.results.map(rowToFile),
-  });
+  } satisfies FolderContents);
 });
 
 folders.post("/", async (c) => {
@@ -85,7 +86,7 @@ folders.post("/", async (c) => {
       foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
     });
   }
-  return c.json({ folder: { id, name, parentId, createdAt } }, 201);
+  return c.json({ folder: { id, name, parentId, createdAt } satisfies FolderItem }, 201);
 });
 
 /**
@@ -134,7 +135,7 @@ folders.patch("/:id", async (c) => {
     await requireFolder(db, userId, folder.id);
     throw invalidMove;
   }
-  return c.json({ folder: await requireFolder(db, userId, folder.id) });
+  return c.json({ folder: (await requireFolder(db, userId, folder.id)) satisfies FolderItem });
 });
 
 /**

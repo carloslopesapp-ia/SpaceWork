@@ -1,8 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { app } from "../src/worker/app";
 import { registerUser } from "./auth-helpers";
-import { dbWithStatementHook } from "./db-helpers";
+import { dbWithBatchHook, dbWithStatementHook, fetchWithEnv, silenceErrors } from "./db-helpers";
 import { countFiles, setQuota, uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
 import { ORIGIN, api, resetState } from "./helpers";
@@ -29,32 +28,7 @@ function rawUpload(
       ...(lengthHeader === null ? {} : { "Content-Length": lengthHeader }),
     },
   });
-  return app.fetch(request, { ...env, ...override } as Env);
-}
-
-/**
- * `DB` em Proxy: tudo vai para `env.DB`, menos `batch`, que passa por `onBatch` com o número da chamada
- * (1.ª = reserva do upload, 2.ª = libertação da reserva) e uma função que corre a `batch` real.
- * A autenticação e as pastas usam `prepare`, por isso não contam como `batch`.
- */
-function dbWithBatchHook(
-  onBatch: (call: number, runReal: () => Promise<D1Result[]>) => Promise<D1Result[]>,
-): D1Database {
-  let calls = 0;
-  return new Proxy(env.DB, {
-    get(target, prop) {
-      if (prop === "batch") {
-        return (statements: D1PreparedStatement[]) => onBatch(++calls, () => target.batch(statements));
-      }
-      const value = Reflect.get(target, prop, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-}
-
-/** Silencia (e deixa inspecionar) o `console.error` que a app usa para registar falhas. */
-function silenceErrors() {
-  return vi.spyOn(console, "error").mockImplementation(() => undefined);
+  return fetchWithEnv(request, override);
 }
 
 describe("PUT /api/files (upload)", () => {

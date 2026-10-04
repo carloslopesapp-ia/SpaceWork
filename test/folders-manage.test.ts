@@ -2,8 +2,10 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { FolderItem } from "../src/shared/types";
 import { registerUser } from "./auth-helpers";
+import { insertFileRow } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
-import { api, resetDb } from "./helpers";
+import { dbWithStatementHook, fetchWithEnv } from "./db-helpers";
+import { api, buildRequest, resetDb } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -11,29 +13,6 @@ const patch = (cookie: string, id: string, json: unknown) =>
   api(`/api/folders/${id}`, { method: "PATCH", cookie, json });
 const remove = (cookie: string, id: string) =>
   api(`/api/folders/${id}`, { method: "DELETE", cookie });
-
-async function insertFileRow(
-  userId: string,
-  folderId: string | null,
-  options: { name?: string; status?: string; deletedAt?: number | null } = {},
-): Promise<string> {
-  const id = crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO files (id, user_id, folder_id, name, name_norm, size, mime, r2_key, status, created_at, deleted_at)
-     VALUES (?1, ?2, ?3, ?4, ?4, 1, 'text/plain', ?5, ?6, 1, ?7)`,
-  )
-    .bind(
-      id,
-      userId,
-      folderId,
-      options.name ?? "a.txt",
-      `u/${userId}/${id}`,
-      options.status ?? "ready",
-      options.deletedAt ?? null,
-    )
-    .run();
-  return id;
-}
 
 describe("PATCH /api/folders/:id (renomear)", () => {
   it("renomeia e normaliza o nome", async () => {
@@ -53,7 +32,9 @@ describe("PATCH /api/folders/:id (renomear)", () => {
     const { cookie } = await registerUser("ana@example.com");
     const a = await createFolder(cookie, "A");
     await createFolder(cookie, "B");
-    expect((await patch(cookie, a.id, { name: "a/b" })).status).toBe(400);
+    const invalid = await patch(cookie, a.id, { name: "a/b" });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: "invalid_name" });
     const dup = await patch(cookie, a.id, { name: "B" });
     expect(dup.status).toBe(409);
     expect(await dup.json()).toMatchObject({ error: "name_taken" });
@@ -66,6 +47,28 @@ describe("PATCH /api/folders/:id (renomear)", () => {
     const res = await patch(cookie, a.id, { name: "\ud800.txt" });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_name" });
+    expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["A"]);
+  });
+
+  it("recusa um nome que não é texto ({ name: 5 }) e um corpo que não é um objeto (400)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const notText = await patch(cookie, a.id, { name: 5 });
+    expect(notText.status).toBe(400);
+    expect(await notText.json()).toMatchObject({ error: "invalid_name" });
+    for (const json of ["texto", [1, 2], null]) {
+      const res = await patch(cookie, a.id, json);
+      expect(res.status, JSON.stringify(json)).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_body" });
+    }
+  });
+
+  it("recusa um corpo acima de 64 KiB (413)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const res = await patch(cookie, a.id, { name: "a".repeat(70 * 1024) });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: "payload_too_large" });
     expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["A"]);
   });
 
@@ -141,6 +144,21 @@ describe("PATCH /api/folders/:id (mover)", () => {
     expect(clash.status).toBe(409);
   });
 
+  it("recusa mover para a raiz uma pasta cujo nome já existe lá (409) e um parentId que não é texto (400)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    await createFolder(cookie, "X");
+    const b = await createFolder(cookie, "B");
+    const inner = await createFolder(cookie, "X", b.id);
+    const clash = await patch(cookie, inner.id, { parentId: "root" });
+    expect(clash.status).toBe(409);
+    expect(await clash.json()).toMatchObject({ error: "name_taken" });
+    expect((await getContents(cookie, b.id)).folders.map((f) => f.name)).toEqual(["X"]); // ficou onde estava
+
+    const bad = await patch(cookie, inner.id, { parentId: 5 });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid_body" });
+  });
+
   it("move e renomeia no mesmo pedido", async () => {
     const { cookie } = await registerUser("ana@example.com");
     const a = await createFolder(cookie, "A");
@@ -193,6 +211,28 @@ describe("DELETE /api/folders/:id", () => {
       .bind(fileId)
       .first<{ folder_id: string | null; deleted_at: number | null }>();
     expect(row).toEqual({ folder_id: null, deleted_at: 5 });
+  });
+
+  it("conteúdo acrescentado depois da verificação: 409 e a batch reverte (o ficheiro da lixeira não sai da pasta)", async () => {
+    const ana = await registerUser("ana@example.com");
+    const bob = await registerUser("bob@example.com");
+    const a = await createFolder(ana.cookie, "A");
+    const naLixeira = await insertFileRow(ana.user.id, a.id, { name: "lixo.txt", deletedAt: 5 });
+    // A pasta passa a verificação (só tem um ficheiro na lixeira) e, antes da batch, aparece lá dentro um ficheiro de
+    // outro utilizador: a chave estrangeira recusa o DELETE e o UPDATE que já tinha corrido na batch tem de desfazer-se.
+    const racingDb = dbWithStatementHook(/^\s*UPDATE files SET folder_id = NULL/, async () => {
+      await insertFileRow(bob.user.id, a.id, { name: "intruso.txt" });
+    });
+    const res = await fetchWithEnv(buildRequest(`/api/folders/${a.id}`, { method: "DELETE", cookie: ana.cookie }), {
+      DB: racingDb,
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "folder_not_empty" });
+    const row = await env.DB.prepare("SELECT folder_id FROM files WHERE id = ?1")
+      .bind(naLixeira)
+      .first<{ folder_id: string | null }>();
+    expect(row?.folder_id).toBe(a.id);
+    expect((await getContents(ana.cookie)).folders.map((f) => f.name)).toEqual(["A"]);
   });
 
   it("devolve 404 para pastas inexistentes ou de outro utilizador e exige sessão", async () => {
