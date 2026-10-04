@@ -8,6 +8,7 @@ import { clientConfig } from "./routes/config";
 import { files } from "./routes/files";
 import { folders } from "./routes/folders";
 import { search } from "./routes/search";
+import { trash } from "./routes/trash";
 import type { AppEnv } from "./types";
 
 export const app = new Hono<AppEnv>();
@@ -30,6 +31,7 @@ app.route("/api/config", clientConfig);
 app.route("/api/folders", folders);
 app.route("/api/files", files);
 app.route("/api/search", search);
+app.route("/api/trash", trash);
 
 app.notFound((c) => c.json({ error: "not_found", message: "Não encontrado." }, 404));
 

@@ -1,0 +1,84 @@
+import type { TrashContents, TrashItem } from "../../shared/types";
+import { getConfig } from "../config";
+import { ApiError } from "../errors";
+import { FILE_COLUMNS, rowToFile, type FileRow } from "../lib/files";
+import { pathsForFolders, trailOf } from "../lib/paths";
+import { purgeTrashed, TRASH_PURGE_BATCH } from "../lib/trash";
+import { createAuthedRouter } from "./authed";
+
+export const trash = createAuthedRouter();
+
+const DAY_MS = 86_400_000;
+/** Itens que a lixeira lista de cada vez (os mais recentes); `total` conta todos. */
+const TRASH_LIST_LIMIT = 200;
+
+async function countTrashed(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM files WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NOT NULL")
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Os ficheiros excluídos, do mais recente para o mais antigo, com a pasta onde estavam e quando o cron os elimina de vez. */
+trash.get("/", async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const retentionDays = getConfig(c.env).trashRetentionDays;
+
+  const [{ results: rows }, total] = await Promise.all([
+    db
+      .prepare(
+        `SELECT ${FILE_COLUMNS}, deleted_at FROM files
+         WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC, id LIMIT ${TRASH_LIST_LIMIT}`,
+      )
+      .bind(userId)
+      .all<FileRow & { deleted_at: number }>(),
+    countTrashed(db, userId),
+  ]);
+  const paths = await pathsForFolders(
+    db,
+    userId,
+    rows.flatMap((row) => (row.folder_id === null ? [] : [row.folder_id])),
+  );
+  const items: TrashItem[] = rows.map((row) => {
+    const { id, name, size, mime, folderId } = rowToFile(row);
+    return {
+      id,
+      name,
+      size,
+      mime,
+      folderId,
+      path: trailOf(paths, folderId),
+      deletedAt: row.deleted_at,
+      purgeAt: row.deleted_at + retentionDays * DAY_MS,
+    };
+  });
+  return c.json({ items, total, retentionDays } satisfies TrashContents);
+});
+
+/** Elimina de vez um ficheiro da lixeira (apaga o objeto do R2 e a linha, e devolve o espaço). */
+trash.delete("/:id", async (c) => {
+  const purged = await purgeTrashed(c.env, c.get("user").id, [c.req.param("id")]);
+  if (purged !== 1) throw new ApiError(404, "file_not_found", "Ficheiro não encontrado na lixeira.");
+  return c.body(null, 204);
+});
+
+/**
+ * Esvazia a lixeira por blocos de `TRASH_PURGE_BATCH` ficheiros (para respeitar o limite de chamadas por invocação).
+ * Responde `{ purged, remaining }`: quem chama repete até `remaining` ser 0 (ou `purged` ser 0, se outro pedido mexer na lixeira).
+ */
+trash.delete("/", async (c) => {
+  const db = c.env.DB;
+  const userId = c.get("user").id;
+  const { results } = await db
+    .prepare(
+      `SELECT id FROM files WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NOT NULL
+       ORDER BY deleted_at, id LIMIT ${TRASH_PURGE_BATCH}`,
+    )
+    .bind(userId)
+    .all<{ id: string }>();
+  const purged = await purgeTrashed(c.env, userId, results.map((row) => row.id));
+  return c.json({ purged, remaining: await countTrashed(db, userId) });
+});
