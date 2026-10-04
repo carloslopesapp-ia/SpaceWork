@@ -35,8 +35,8 @@ interface ApiInit {
   headers?: Record<string, string>;
 }
 
-/** Chama o Worker como um browser: caminho relativo ou URL absoluta. */
-export function api(path: string, init: ApiInit = {}): Promise<Response> {
+/** Constrói o pedido que `api` envia (para testes que chamam a app com bindings alterados). */
+export function buildRequest(path: string, init: ApiInit = {}): Request {
   const headers = new Headers(init.headers);
   const origin = init.origin === undefined ? ORIGIN : init.origin;
   if (origin !== null) headers.set("Origin", origin);
@@ -47,7 +47,12 @@ export function api(path: string, init: ApiInit = {}): Promise<Response> {
     body = JSON.stringify(init.json);
   }
   const url = path.startsWith("http") ? path : `${ORIGIN}${path}`;
-  return exports.default.fetch(new Request(url, { method: init.method ?? "GET", headers, body }));
+  return new Request(url, { method: init.method ?? "GET", headers, body });
+}
+
+/** Chama o Worker como um browser: caminho relativo ou URL absoluta. */
+export function api(path: string, init: ApiInit = {}): Promise<Response> {
+  return exports.default.fetch(buildRequest(path, init));
 }
 
 /** Extrai `sw_session=<token>` do Set-Cookie; null se não houver token (ex.: cookie apagado). */

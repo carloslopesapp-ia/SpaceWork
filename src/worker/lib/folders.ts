@@ -45,7 +45,10 @@ export async function requireFolder(
   return folder;
 }
 
-/** Caminho da raiz até à pasta (inclusive), por consulta recursiva. */
+/** Profundidade máxima das consultas recursivas: mesmo com um ciclo já gravado, terminam. */
+export const MAX_FOLDER_DEPTH = 1000;
+
+/** Caminho da raiz até à pasta (inclusive), por consulta recursiva (com limite de profundidade). */
 export async function breadcrumbFor(
   db: D1Database,
   userId: string,
@@ -58,7 +61,7 @@ export async function breadcrumbFor(
          UNION ALL
          SELECT f.id, f.parent_id, f.name, a.depth + 1
          FROM folders f JOIN anc a ON f.id = a.parent_id
-         WHERE f.user_id = ?2
+         WHERE f.user_id = ?2 AND a.depth < ${MAX_FOLDER_DEPTH}
        )
        SELECT id, name FROM anc ORDER BY depth DESC`,
     )
@@ -67,7 +70,10 @@ export async function breadcrumbFor(
   return results;
 }
 
-/** Mover `folderId` para dentro de `newParentId` cria um ciclo se for a própria pasta ou uma descendente dela. */
+/**
+ * Mover `folderId` para dentro de `newParentId` cria um ciclo se for a própria pasta ou uma descendente dela.
+ * É só uma pré-verificação rápida: a garantia é o `UPDATE` do `PATCH` (ver `UPDATE_FOLDER_SQL`).
+ */
 export async function wouldCreateCycle(
   db: D1Database,
   userId: string,
@@ -77,3 +83,20 @@ export async function wouldCreateCycle(
   const trail = await breadcrumbFor(db, userId, newParentId);
   return trail.some((item) => item.id === folderId);
 }
+
+/**
+ * Renomeia e/ou move uma pasta numa só instrução atómica. Só grava as colunas pedidas (`?1` nome ou NULL,
+ * `?2` chave de pesquisa ou NULL, `?3` = 1 se o pedido traz `parentId`, `?4` novo pai ou NULL, `?5` pasta,
+ * `?6` utilizador) e recusa, na própria instrução, um destino que seja a pasta ou uma descendente dela
+ * (ou uma cadeia mais funda do que `MAX_FOLDER_DEPTH`): dois movimentos opostos em paralelo não criam ciclos.
+ */
+export const UPDATE_FOLDER_SQL = `
+  UPDATE folders SET name = COALESCE(?1, name), name_norm = COALESCE(?2, name_norm),
+    parent_id = CASE WHEN ?3 = 1 THEN ?4 ELSE parent_id END
+  WHERE id = ?5 AND user_id = ?6
+    AND NOT (?3 = 1 AND ?4 IS NOT NULL AND EXISTS (
+      WITH RECURSIVE anc(id, depth) AS (
+        SELECT ?4, 0 UNION ALL
+        SELECT f.parent_id, a.depth + 1 FROM folders f JOIN anc a ON f.id = a.id
+        WHERE f.user_id = ?6 AND f.parent_id IS NOT NULL AND a.depth < ${MAX_FOLDER_DEPTH})
+      SELECT 1 FROM anc WHERE id = ?5 OR depth >= ${MAX_FOLDER_DEPTH}))`;

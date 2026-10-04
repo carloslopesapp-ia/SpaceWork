@@ -7,6 +7,7 @@ import {
   parseFolderRef,
   requireFolder,
   rowToFolder,
+  UPDATE_FOLDER_SQL,
   wouldCreateCycle,
   type FolderRow,
 } from "../lib/folders";
@@ -86,7 +87,11 @@ folders.post("/", async (c) => {
   return c.json({ folder: { id, name, parentId, createdAt } }, 201);
 });
 
-/** Renomeia e/ou move uma pasta (`parentId: null` ou "root" = raiz). Só mexe na D1. */
+/**
+ * Renomeia e/ou move uma pasta (`parentId: null` ou "root" = raiz). Só mexe na D1. A verificação do ciclo
+ * e a escrita são uma só instrução (`UPDATE_FOLDER_SQL`) que só grava as colunas pedidas; a resposta vem
+ * de uma releitura depois do `UPDATE`.
+ */
 folders.patch("/:id", async (c) => {
   const db = c.env.DB;
   const userId = c.get("user").id;
@@ -98,25 +103,23 @@ folders.patch("/:id", async (c) => {
     throw new ApiError(400, "invalid_body", "Indique o novo nome e/ou a nova pasta.");
   }
 
-  const name = hasName ? parseName(readString(body, "name")) : folder.name;
-  const parentId = hasParent ? parseFolderRef(body.parentId) : folder.parentId;
-  if (hasParent && parentId !== null) {
+  const name = hasName ? parseName(readString(body, "name")) : null;
+  const parentId = hasParent ? parseFolderRef(body.parentId) : null;
+  const invalidMove = new ApiError(
+    400,
+    "invalid_move",
+    "Não é possível mover uma pasta para dentro de si própria ou de uma das suas subpastas.",
+  );
+  if (parentId !== null) {
     await requireFolder(db, userId, parentId);
-    if (await wouldCreateCycle(db, userId, folder.id, parentId)) {
-      throw new ApiError(
-        400,
-        "invalid_move",
-        "Não é possível mover uma pasta para dentro de si própria ou de uma das suas subpastas.",
-      );
-    }
+    if (await wouldCreateCycle(db, userId, folder.id, parentId)) throw invalidMove;
   }
 
+  let updated;
   try {
-    await db
-      .prepare(
-        "UPDATE folders SET name = ?1, name_norm = ?2, parent_id = ?3 WHERE id = ?4 AND user_id = ?5",
-      )
-      .bind(name, searchKey(name), parentId, folder.id, userId)
+    updated = await db
+      .prepare(UPDATE_FOLDER_SQL)
+      .bind(name, name === null ? null : searchKey(name), hasParent ? 1 : 0, parentId, folder.id, userId)
       .run();
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -124,7 +127,12 @@ folders.patch("/:id", async (c) => {
     }
     throw error;
   }
-  return c.json({ folder: { ...folder, name, parentId } });
+  // Nenhuma linha alterada: ou a pasta já não existe, ou o destino passou a ser uma descendente dela.
+  if (updated.meta.changes !== 1) {
+    await requireFolder(db, userId, folder.id);
+    throw invalidMove;
+  }
+  return c.json({ folder: await requireFolder(db, userId, folder.id) });
 });
 
 /**
