@@ -3465,7 +3465,7 @@ function setup(props: Partial<Parameters<typeof MoveDialog>[0]> = {}) {
   return { onSubmit, onClose, user: userEvent.setup() };
 }
 
-const optionTexts = () => screen.getAllByRole("option").map((option) => (option.textContent ?? "").replace(/ /g, "·"));
+const optionTexts = () => screen.getAllByRole("option").map((option) => (option.textContent ?? "").replace(/\u00a0/g, "·"));
 
 describe("MoveDialog", () => {
   it("lista a raiz e as pastas recuadas, com a pasta atual desativada", async () => {
@@ -3606,7 +3606,7 @@ export function MoveDialog({ title, currentFolderId, movingFolderId, pending, er
                 const disabled = here || (option.id !== null && blocked.has(option.id));
                 return (
                   <option key={option.id ?? ROOT_VALUE} value={option.id ?? ROOT_VALUE} disabled={disabled}>
-                    {"  ".repeat(option.depth)}
+                    {"\u00a0\u00a0".repeat(option.depth)}
                     {option.name}
                     {here ? " (pasta atual)" : ""}
                   </option>
@@ -5121,12 +5121,12 @@ por:
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
+Expected: `Test Files  21 passed (21)`, `Tests  137 passed (137)`.
 
 - [ ] **Step 6: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
+Expected: `Test Files  21 passed (21)`, `Tests  137 passed (137)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -5257,7 +5257,7 @@ Run: `npx vitest run`
 Expected: `Test Files  24 passed (24)`, `Tests  208 passed (208)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
+Expected: `Test Files  21 passed (21)`, `Tests  137 passed (137)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -5306,7 +5306,7 @@ git commit -m "Documenta a interface, os comandos de teste e regista o Plano 2B"
 
 **Fora deste plano:** a pesquisa por nome, a partilha por link, o ecrã da lixeira (Plano 3); o painel de administração (Plano 4); o deploy e os testes de ponta a ponta com Playwright (Plano 5). Até ao Plano 3, «Excluir» num ficheiro só o manda para a lixeira e o espaço não é libertado.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 24 passed (24); Tests 208 passed (208). Interface: Test Files 21 passed (21); Tests 128 passed (128).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 24 passed (24); Tests 208 passed (208). Interface: Test Files 21 passed (21); Tests 137 passed (137).
 
 ## Notas da execução
 
@@ -5316,4 +5316,5 @@ git commit -m "Documenta a interface, os comandos de teste e regista o Plano 2B"
   - **Task 4, `src/web/uploads.ts` (`finish`):** um `onSettled` que lançasse impedia o `pump()` e a fila ficava parada. Agora o `onSettled` corre num `try/catch` (o erro é engolido de propósito) e o `pump()` num `finally`; teste novo em `uploads.test.ts`.
   - **Task 5, `src/web/components/Modal.tsx`:** o foco não voltava a quem abriu o diálogo quando um filho tinha `autoFocus` (`NameDialog`: «Nova pasta», «Renomear»), porque o elemento era lido no `useEffect`, depois do `autoFocus`. Agora é guardado no primeiro render (`useState(() => document.activeElement)`); teste novo em `NameDialog.test.tsx`.
   - **Task 8, `src/web/uploads.ts` (`cancelAll`), `src/web/uploads-context.tsx` e `src/web/components/AppLayout.tsx`:** a fila de envios sobrevivia ao `UploadsProvider` (fim de sessão, 401, erro ao ler o utilizador) e continuava a enviar; depois de um logout, os ficheiros em espera podiam subir para o espaço de outro utilizador que entrasse no mesmo separador. Agora o `UploadManager` tem `cancelAll()`, o provider chama-o ao desmontar, e o `AppLayout` só mostra o ecrã de erro de `["me"]` quando ainda não há dados (um refetch falhado em segundo plano deixa de desmontar a aplicação); testes novos em `uploads.test.ts`, `uploads-context.test.tsx` e `AppLayout.test.tsx`.
+- **Ronda final (revisão do ramo todo):** corrigiu, num só passo, o que a revisão final achou: um refetch falhado em segundo plano deixava de trocar a lista (e os diálogos abertos) pelo ecrã de erro (`FolderPage` e `MoveDialog`); o teste de envio da página passou a provar que a lista se atualiza; a página é remontada por pasta (`key` em `App.tsx`); os nomes dos envios passam por `validateName` antes de entrar na fila; uma guarda ao nível da janela impede o browser de abrir um ficheiro largado fora da zona; e o `UploadsProvider` tem `key={user.id}` (uma troca de utilizador no mesmo separador cancela a fila). Os espaços não separáveis do `MoveDialog` passaram a escapes `\u00a0`. Os totais finais são Worker 24 ficheiros / 208 testes e interface 21 ficheiros / 137 testes. Os pendentes que ficaram de fora (acessibilidade fina, cargas fora do `apiFetch`, vários testes) estão no índice dos planos, nas secções do Plano 3 e do Plano 5.
 - **Verificação manual:** a lista da Task 9 foi percorrida num browser real durante a escrita deste plano (criar pastas com acentos, enviar `.png`, `.pdf` e um nome com `+ & é`, ficheiro acima do limite, pré-visualizar imagem e PDF, mover, excluir pasta com conteúdo, sessão terminada por baixo da interface).
