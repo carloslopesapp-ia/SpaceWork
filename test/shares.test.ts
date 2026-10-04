@@ -10,6 +10,7 @@ import { api, resetState } from "./helpers";
 beforeEach(resetState);
 
 const HOUR_MS = 3_600_000;
+const YEAR_MS = 365 * 86_400_000;
 
 const createShare = (cookie: string, fileId: string, json: unknown = {}) =>
   api(`/api/files/${fileId}/shares`, { method: "POST", cookie, json });
@@ -56,11 +57,33 @@ describe("POST /api/files/:id/shares", () => {
     expect((await created(cookie, file.id, { expiresAt: inOneHour })).share.expiresAt).toBe(inOneHour);
     expect((await created(cookie, file.id, { expiresAt: null })).share.expiresAt).toBeNull();
 
-    for (const expiresAt of [Date.now() - 1000, 0, "amanhã", 1.5, true, {}]) {
+    const invalid = [
+      Date.now() - 1000,
+      0,
+      -0,
+      "amanhã",
+      1.5,
+      true,
+      {},
+      [],
+      Number.MAX_SAFE_INTEGER, // para lá dos 100 anos (a interface formata a data com `Intl`, que lança acima de 8,64e15)
+      Date.now() + 101 * YEAR_MS,
+    ];
+    for (const expiresAt of invalid) {
       const res = await createShare(cookie, file.id, { expiresAt });
       expect(res.status, JSON.stringify(expiresAt)).toBe(400);
       expect(await res.json()).toMatchObject({ error: "invalid_expiry" });
     }
+    // `1e999` em JSON lê-se como `Infinity`: tem de ir como texto, o `JSON.stringify` do helper dava `null`.
+    const infinite = await api(`/api/files/${file.id}/shares`, {
+      method: "POST",
+      cookie,
+      body: '{"expiresAt":1e999}',
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(infinite.status).toBe(400);
+    expect(await infinite.json()).toMatchObject({ error: "invalid_expiry" });
+    expect((await createShare(cookie, file.id, { expiresAt: Date.now() + 99 * YEAR_MS })).status).toBe(201);
     const noBody = await api(`/api/files/${file.id}/shares`, { method: "POST", cookie });
     expect(noBody.status).toBe(400);
     expect(await noBody.json()).toMatchObject({ error: "invalid_body" });
@@ -96,6 +119,19 @@ describe("POST /api/files/:id/shares", () => {
     expect((await createShare(cookie, file.id)).status).toBe(201);
     expect((await createShare(cookie, file.id)).status).toBe(201);
     expect((await createShare(cookie, file.id)).status).toBe(409);
+  });
+
+  it("25 pedidos em paralelo criam exatamente 20 links e os outros 5 dão 409 (o teto é atómico)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const file = await uploadOk(cookie, "a.txt", "x");
+
+    const responses = await Promise.all(Array.from({ length: 25 }, () => createShare(cookie, file.id)));
+
+    expect(responses.filter((res) => res.status === 201)).toHaveLength(20);
+    const refused = responses.filter((res) => res.status === 409);
+    expect(refused).toHaveLength(5);
+    for (const res of refused) expect(await res.json()).toMatchObject({ error: "too_many_shares" });
+    expect(await listShares(cookie, file.id)).toHaveLength(20);
   });
 
   it("recusa com 413 um corpo acima de 64 KiB", async () => {

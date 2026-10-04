@@ -48,6 +48,8 @@ describe("páginas públicas de partilha", () => {
     expect(res.headers.get("content-disposition")).toContain("attachment");
     expect(res.headers.get("content-disposition")).toContain("filename*=UTF-8''relat%C3%B3rio.txt");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("um link que nunca existiu e um ativo falham do mesmo modo que um link revogado, expirado ou de um ficheiro na lixeira (404 igual, sem pistas)", async () => {

@@ -26,6 +26,7 @@ describe("GET /api/files/:id/download", () => {
       `attachment; filename="nota.txt"; filename*=UTF-8''nota.txt`,
     );
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]+"$/);
   });
