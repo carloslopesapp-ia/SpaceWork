@@ -49,3 +49,45 @@ export interface ClientConfig {
   /** Tamanho máximo de um ficheiro, em bytes. */
   maxUploadBytes: number;
 }
+
+/** Resultado de uma pesquisa por nome; `path` é o caminho da pasta onde o item está (vazio = raiz). */
+export type SearchResult = { path: BreadcrumbItem[] } & (
+  | { kind: "folder"; folder: FolderItem }
+  | { kind: "file"; file: FileItem }
+);
+
+/** Ficheiro na lixeira. */
+export interface TrashItem {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+  /** Pasta onde estava (null = raiz) e o caminho até lá. */
+  folderId: string | null;
+  path: BreadcrumbItem[];
+  deletedAt: number;
+  /** Quando o cron o elimina de vez: `deletedAt` mais os dias de retenção. */
+  purgeAt: number;
+}
+
+/** A lixeira (`GET /api/trash`): os mais recentes primeiro, no máximo 200; `total` conta todos. */
+export interface TrashContents {
+  items: TrashItem[];
+  total: number;
+  retentionDays: number;
+}
+
+/** Um link de partilha ativo (nunca inclui o token, que só se mostra na criação). */
+export interface ShareItem {
+  id: string;
+  fileId: string;
+  createdAt: number;
+  /** null = sem validade. */
+  expiresAt: number | null;
+}
+
+/** O que a página pública de um link mostra. */
+export interface PublicShare {
+  name: string;
+  size: number;
+}

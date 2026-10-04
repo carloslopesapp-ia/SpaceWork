@@ -100,3 +100,21 @@ export function dbWithStatementHook(pattern: RegExp, before: () => Promise<void>
     },
   });
 }
+
+/** `DB` em Proxy que regista o SQL de cada `prepare`: para testar quantas consultas uma operação faz. */
+export function dbCountingPrepares(): { db: D1Database; sql: string[] } {
+  const sql: string[] = [];
+  const db = new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop === "prepare") {
+        return (query: string) => {
+          sql.push(query);
+          return target.prepare(query);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { db, sql };
+}
