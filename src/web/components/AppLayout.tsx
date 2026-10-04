@@ -1,6 +1,8 @@
-import { Navigate, NavLink, Outlet } from "react-router";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router";
+import { errorMessage } from "../api";
 import { useLogout, useMe } from "../auth";
 import { Button } from "./Button";
+import { Message } from "./Message";
 import { UsageBar } from "./UsageBar";
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -13,13 +15,17 @@ function navClass({ isActive }: { isActive: boolean }): string {
 export default function AppLayout() {
   const me = useMe();
   const logout = useLogout();
+  const { pathname } = useLocation();
 
   if (me.isPending) return <p className="p-8 text-slate-500">A carregar…</p>;
   if (me.isError) {
     return (
-      <p role="alert" className="p-8 text-red-700">
-        Não foi possível contactar o servidor. Tente novamente.
-      </p>
+      <div className="max-w-md space-y-4 p-8">
+        <Message kind="error">{errorMessage(me.error)}</Message>
+        <Button variant="secondary" onClick={() => void me.refetch()}>
+          Tentar novamente
+        </Button>
+      </div>
     );
   }
   if (!me.data) return <Navigate to="/login" replace />;
@@ -30,7 +36,8 @@ export default function AppLayout() {
       <aside className="flex shrink-0 flex-col gap-6 border-b border-slate-200 bg-white p-4 md:min-h-screen md:w-64 md:border-r md:border-b-0">
         <div className="text-xl font-bold tracking-tight text-indigo-600">SpaceWork</div>
         <nav className="flex gap-1 md:flex-col" aria-label="Principal">
-          <NavLink to="/" end className={navClass}>
+          {/* "Meu espaço" também fica ativo dentro das pastas (/pasta/...). */}
+          <NavLink to="/" end className={({ isActive }) => navClass({ isActive: isActive || pathname.startsWith("/pasta/") })}>
             Meu espaço
           </NavLink>
           <NavLink to="/conta" className={navClass}>
@@ -42,6 +49,7 @@ export default function AppLayout() {
           <div className="truncate text-xs text-slate-500" title={user.email}>
             {user.email}
           </div>
+          {logout.isError && <Message kind="error">{errorMessage(logout.error)}</Message>}
           <Button
             variant="secondary"
             className="w-full"
