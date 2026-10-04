@@ -2,14 +2,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { HTTPException } from "hono/http-exception";
 import { app } from "../src/worker/app";
 import { JSON_BODY_LIMIT_BYTES } from "../src/worker/middleware/body-limit";
-import { api, resetDb } from "./helpers";
+import { registerUser } from "./auth-helpers";
+import { uploadFile } from "./file-helpers";
+import { api, resetState } from "./helpers";
 
 // Rota só para este ficheiro de testes (cada ficheiro corre no seu próprio isolate).
 app.get("/api/__teste/http-exception", () => {
   throw new HTTPException(418, { message: "sou um bule" });
 });
 
-beforeEach(resetDb);
+beforeEach(resetState);
 
 describe("Cache-Control", () => {
   it("todas as respostas da API levam no-store", async () => {
@@ -47,5 +49,27 @@ describe("erros do Hono (HTTPException)", () => {
     const res = await api("/api/__teste/http-exception");
     expect(res.status).toBe(418);
     expect(await res.json()).toEqual({ error: "http_error", message: "sou um bule" });
+  });
+});
+
+describe("o limite do corpo vale para toda a API, menos o upload", () => {
+  it("recusa com 413 corpos acima de 64 KiB em qualquer método e rota, mesmo sem sessão", async () => {
+    const big = "x".repeat(JSON_BODY_LIMIT_BYTES + 1);
+    const attempts = [
+      ["POST", "/api/files/x"],
+      ["PATCH", "/api/files/x"],
+      ["DELETE", "/api/files/x"],
+      ["POST", "/api/folders"],
+    ] as const;
+    for (const [method, path] of attempts) {
+      const res = await api(path, { method, body: big, headers: { "Content-Type": "application/json" } });
+      expect(res.status, `${method} ${path}`).toBe(413);
+    }
+  });
+
+  it("o upload (PUT /api/files) fica de fora: vai em stream e tem o seu próprio limite", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const res = await uploadFile(cookie, "grande.bin", new Uint8Array(JSON_BODY_LIMIT_BYTES + 1));
+    expect(res.status).toBe(201);
   });
 });

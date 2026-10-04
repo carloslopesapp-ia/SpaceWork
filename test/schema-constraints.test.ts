@@ -67,3 +67,16 @@ describe("restrições do esquema", () => {
     expect(results.map((r) => r.name)).toEqual(["files_folder_id", "folders_parent_id", "shares_user_id"]);
   });
 });
+
+describe("partilhas", () => {
+  it("apagar um ficheiro apaga as suas partilhas (ON DELETE CASCADE)", async () => {
+    await insertUser();
+    await insertFile("f1");
+    await env.DB.prepare(
+      "INSERT INTO shares (id, token_hash, file_id, user_id, created_at) VALUES ('s1', 'h1', 'f1', 'u1', 1)",
+    ).run();
+    await env.DB.prepare("DELETE FROM files WHERE id = 'f1'").run();
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM shares").first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+});

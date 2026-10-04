@@ -66,3 +66,26 @@ describe("profundidade máxima das pastas (100 níveis)", () => {
     expect((await patch(cookie, chain[99], { parentId: null })).status).toBe(200);
   });
 });
+
+describe("altura da pasta ao mover", () => {
+  it("só conta as pastas do próprio utilizador (uma cadeia de outro utilizador pendurada nela não conta)", async () => {
+    const { cookie, user } = await registerUser("ana@example.com");
+    const bob = await registerUser("bob@example.com");
+    const chain = await insertChain(user.id, "n", 99); // a última está no nível 99
+    const moved = await createFolder(cookie, "movida");
+    // Por SQL: 99 pastas do Bob penduradas na pasta da Ana (pela API isto nunca acontece).
+    await insertChain(bob.user.id, "b", 99, moved.id);
+    expect((await patch(cookie, moved.id, { parentId: chain[98] })).status).toBe(200);
+  });
+
+  it("conta níveis e não pastas: uma pasta larga (várias subpastas ao mesmo nível) tem altura 2", async () => {
+    const { cookie, user } = await registerUser("ana@example.com");
+    const chain = await insertChain(user.id, "n", 99);
+    const moved = await createFolder(cookie, "movida");
+    for (const name of ["a", "b", "c"]) await createFolder(cookie, name, moved.id);
+
+    // altura 2: por baixo do nível 99 ficaria no 101 (não cabe); por baixo do 98 fica no 100 (cabe)
+    expect((await patch(cookie, moved.id, { parentId: chain[98] })).status).toBe(400);
+    expect((await patch(cookie, moved.id, { parentId: chain[97] })).status).toBe(200);
+  });
+});

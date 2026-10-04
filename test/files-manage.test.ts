@@ -45,7 +45,7 @@ describe("PATCH /api/files/:id (renomear)", () => {
     expect(await invalid.json()).toMatchObject({ error: "invalid_name" });
     const dup = await patch(cookie, a.id, { name: "b.txt" });
     expect(dup.status).toBe(409);
-    expect(await dup.json()).toMatchObject({ error: "name_taken" });
+    expect(await dup.json()).toMatchObject({ error: "name_taken", message: expect.stringContaining("em curso") });
     expect((await patch(cookie, a.id, { name: "a.txt" })).status).toBe(200);
   });
 

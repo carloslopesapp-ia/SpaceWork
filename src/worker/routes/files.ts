@@ -6,6 +6,7 @@ import { getConfig } from "../config";
 import { ApiError, rethrowConstraint } from "../errors";
 import {
   contentDisposition,
+  fileNameTaken,
   parseRange,
   r2KeyFor,
   requireFile,
@@ -15,7 +16,7 @@ import {
 import { parseFolderRef, requireFolder } from "../lib/folders";
 import { readJsonObject, readString } from "../lib/http";
 import { parseName } from "../lib/names";
-import { jsonBodyLimit } from "../middleware/body-limit";
+import { attachmentResponse, missingObject } from "../lib/serve";
 import { createAuthedRouter } from "./authed";
 
 export const files = createAuthedRouter();
@@ -85,7 +86,7 @@ files.put("/", async (c) => {
     ]);
   } catch (error) {
     rethrowConstraint(error, {
-      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local (pode ser um envio ainda em curso)."),
+      unique: fileNameTaken(),
       // A pasta foi apagada entre a verificação e a reserva.
       foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
     });
@@ -111,8 +112,8 @@ files.put("/", async (c) => {
 });
 
 /**
- * Desfaz a reserva de um upload que falhou: apaga a linha `pending` e devolve o espaço, numa só
- * `batch` (o `changes()` garante que o espaço só é devolvido se a linha foi mesmo apagada).
+ * Desfaz a reserva de um upload que falhou: devolve o espaço e apaga a linha `pending`, numa só
+ * `batch` (o espaço só se devolve se a linha `pending` ainda existe).
  *
  * O objeto do R2 só se apaga se a linha `pending` foi mesmo apagada. Se a linha já está `ready` (a D1
  * confirmou o `UPDATE` mas a resposta perdeu-se), o objeto é o conteúdo do ficheiro e não se toca;
@@ -128,11 +129,12 @@ async function releaseReservation(
 ): Promise<void> {
   let removed = false;
   try {
-    const [deleted] = await env.DB.batch([
-      env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
+    const [, deleted] = await env.DB.batch([
       env.DB.prepare(
-        "UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0) WHERE id = ?2 AND changes() = 1",
-      ).bind(size, userId),
+        `UPDATE users SET used_bytes = MAX(used_bytes - ?1, 0)
+         WHERE id = ?2 AND EXISTS (SELECT 1 FROM files WHERE id = ?3 AND status = 'pending')`,
+      ).bind(size, userId, fileId),
+      env.DB.prepare("DELETE FROM files WHERE id = ?1 AND status = 'pending'").bind(fileId),
     ]);
     removed = deleted.meta.changes === 1;
   } catch (error) {
@@ -145,25 +147,12 @@ async function releaseReservation(
   }
 }
 
-function missingObject(fileId: string): ApiError {
-  console.error(`O ficheiro ${fileId} existe na D1 mas não tem objeto no R2.`);
-  return new ApiError(404, "file_missing", "O conteúdo do ficheiro não está disponível.");
-}
-
 /** Descarrega o ficheiro em *stream*, sempre como anexo (nunca é interpretado pelo browser). */
 files.get("/:id/download", async (c) => {
   const file = await requireFile(c.env.DB, c.get("user").id, c.req.param("id"));
   const object = await c.env.FILES.get(file.r2Key);
   if (!object) throw missingObject(file.id);
-
-  return new Response(object.body, {
-    headers: {
-      "Content-Type": file.mime,
-      "Content-Length": String(object.size),
-      "Content-Disposition": contentDisposition("attachment", file.name),
-      ETag: object.httpEtag,
-    },
-  });
+  return attachmentResponse(object, file);
 });
 
 /**
@@ -211,7 +200,7 @@ files.get("/:id/preview", async (c) => {
  * O `UPDATE` só grava as colunas pedidas (um pedido concorrente do mesmo utilizador não é desfeito) e a
  * resposta vem de uma releitura depois dele.
  */
-files.patch("/:id", jsonBodyLimit, async (c) => {
+files.patch("/:id", async (c) => {
   const db = c.env.DB;
   const userId = c.get("user").id;
   const file = await requireFile(db, userId, c.req.param("id"));
@@ -238,7 +227,7 @@ files.patch("/:id", jsonBodyLimit, async (c) => {
       .run();
   } catch (error) {
     rethrowConstraint(error, {
-      unique: new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local (pode ser um envio ainda em curso)."),
+      unique: fileNameTaken(),
       // O destino foi apagado entre a verificação e o UPDATE.
       foreignKey: new ApiError(404, "folder_not_found", "Pasta não encontrada."),
     });

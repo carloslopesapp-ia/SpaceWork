@@ -13,8 +13,11 @@ export const app = new Hono<AppEnv>();
 
 app.use("/api/*", securityHeaders);
 app.use("/api/*", originCheck);
-app.use("/api/auth/*", jsonBodyLimit);
-app.use("/api/folders/*", jsonBodyLimit);
+// O limite de 64 KiB vale para toda a API, menos o upload (`PUT /api/files`), que vai em stream e tem o seu próprio limite.
+// Montado aqui e não rota a rota: uma rota nova não se pode esquecer dele.
+app.use("/api/*", (c, next) =>
+  c.req.method === "PUT" && /^\/api\/files\/?$/.test(c.req.path) ? next() : jsonBodyLimit(c, next),
+);
 
 app.get("/api/health", async (c) => {
   const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();

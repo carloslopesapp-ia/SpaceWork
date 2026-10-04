@@ -118,3 +118,8 @@ export function parseRange(header: string | undefined, size: number): ByteRange 
   if (last !== "" && end < start) return null;
   return { offset: start, length: Math.min(end, size - 1) - start + 1 };
 }
+
+/** 409 de um nome de ficheiro repetido; um envio ainda em curso também ocupa o nome, mas não aparece na lista. */
+export function fileNameTaken(): ApiError {
+  return new ApiError(409, "name_taken", "Já existe um ficheiro com esse nome neste local (pode ser um envio ainda em curso).");
+}

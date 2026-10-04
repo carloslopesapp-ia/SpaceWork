@@ -146,3 +146,24 @@ describe("pasta ou destino apagados a meio do pedido: 404 em vez de 500", () => 
     expect(await res.json()).toMatchObject({ error: "folder_not_found" });
   });
 });
+
+describe("PATCH /api/folders/:id: a guarda do UPDATE contra ciclos", () => {
+  it("um ciclo gravado depois das verificações rápidas: o UPDATE termina (limite de profundidade) e recusa com invalid_move", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const b = await createFolder(cookie, "B");
+    const destination = await createFolder(cookie, "Destino");
+    const moved = await createFolder(cookie, "Movida");
+
+    // As verificações rápidas já passaram quando o ciclo A <-> B, com o destino pendurado nele, é gravado por SQL.
+    const res = await patchWithRace(cookie, moved.id, { parentId: destination.id }, async () => {
+      await setParent(a.id, b.id);
+      await setParent(b.id, a.id);
+      await setParent(destination.id, a.id);
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_move" });
+    expect(await parentOf(moved.id)).toBeNull();
+  });
+});
