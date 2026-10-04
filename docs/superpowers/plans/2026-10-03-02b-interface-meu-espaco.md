@@ -5121,12 +5121,12 @@ por:
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  122 passed (122)`.
+Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
 
 - [ ] **Step 6: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  122 passed (122)`.
+Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -5257,7 +5257,7 @@ Run: `npx vitest run`
 Expected: `Test Files  24 passed (24)`, `Tests  208 passed (208)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  21 passed (21)`, `Tests  122 passed (122)`.
+Expected: `Test Files  21 passed (21)`, `Tests  128 passed (128)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -5306,10 +5306,14 @@ git commit -m "Documenta a interface, os comandos de teste e regista o Plano 2B"
 
 **Fora deste plano:** a pesquisa por nome, a partilha por link, o ecrã da lixeira (Plano 3); o painel de administração (Plano 4); o deploy e os testes de ponta a ponta com Playwright (Plano 5). Até ao Plano 3, «Excluir» num ficheiro só o manda para a lixeira e o espaço não é libertado.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 24 passed (24); Tests 208 passed (208). Interface: Test Files 21 passed (21); Tests 122 passed (122).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 24 passed (24); Tests 208 passed (208). Interface: Test Files 21 passed (21); Tests 128 passed (128).
 
 ## Notas da execução
 
 - **Sem `ApiErrorCode`:** a união de códigos de erro e o seu mapa de mensagens, que o índice dos planos previa, não foram feitos: o servidor já responde em português e a interface só mostra a `message`. Exportar a união quando a interface precisar de decidir por código.
 - **PDF e o foco:** no diálogo de pré-visualização de um PDF, o leitor do Chrome fica com o foco depois de carregar e o `Esc` deixa de chegar ao diálogo (o botão «Fechar», o clique no fundo e o Tab funcionam). Tentou-se devolver o foco ao botão no `onLoad` do `<iframe>`, mas o leitor volta a tomá-lo cerca de meio segundo depois. Fica para o Plano 5 (Playwright).
+- **Corrigido na execução (o código do repositório prevalece sobre os blocos deste plano):** as revisões das tarefas acharam quatro defeitos que o plano não tinha; cada um foi corrigido com um teste de regressão escrito primeiro. Por isso os totais intermédios de testes das Tasks 5 a 8 ficam 1 a 4 acima do que cada passo indica (os totais finais, na secção acima, já são os reais) e há blocos de código que diferem do plano:
+  - **Task 4, `src/web/uploads.ts` (`finish`):** um `onSettled` que lançasse impedia o `pump()` e a fila ficava parada. Agora o `onSettled` corre num `try/catch` (o erro é engolido de propósito) e o `pump()` num `finally`; teste novo em `uploads.test.ts`.
+  - **Task 5, `src/web/components/Modal.tsx`:** o foco não voltava a quem abriu o diálogo quando um filho tinha `autoFocus` (`NameDialog`: «Nova pasta», «Renomear»), porque o elemento era lido no `useEffect`, depois do `autoFocus`. Agora é guardado no primeiro render (`useState(() => document.activeElement)`); teste novo em `NameDialog.test.tsx`.
+  - **Task 8, `src/web/uploads.ts` (`cancelAll`), `src/web/uploads-context.tsx` e `src/web/components/AppLayout.tsx`:** a fila de envios sobrevivia ao `UploadsProvider` (fim de sessão, 401, erro ao ler o utilizador) e continuava a enviar; depois de um logout, os ficheiros em espera podiam subir para o espaço de outro utilizador que entrasse no mesmo separador. Agora o `UploadManager` tem `cancelAll()`, o provider chama-o ao desmontar, e o `AppLayout` só mostra o ecrã de erro de `["me"]` quando ainda não há dados (um refetch falhado em segundo plano deixa de desmontar a aplicação); testes novos em `uploads.test.ts`, `uploads-context.test.tsx` e `AppLayout.test.tsx`.
 - **Verificação manual:** a lista da Task 9 foi percorrida num browser real durante a escrita deste plano (criar pastas com acentos, enviar `.png`, `.pdf` e um nome com `+ & é`, ficheiro acima do limite, pré-visualizar imagem e PDF, mover, excluir pasta com conteúdo, sessão terminada por baixo da interface).
