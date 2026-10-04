@@ -5,7 +5,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | # | Plano | Entrega | Estado |
 |---|---|---|---|
 | 1 | [Fundação](2026-10-03-01-fundacao.md) | Projeto Cloudflare, esquema D1, autenticação completa (registo, login, logout, alterar senha), master, interface de login/registo/conta | Concluído |
-| 2A | [API de pastas e ficheiros](2026-10-03-02a-api-pastas-ficheiros.md) | Pastas (listar, criar, renomear, mover, excluir vazias), upload com quota atómica, descarregar, pré-visualizar, renomear, mover e excluir ficheiros; isolamento entre utilizadores | Escrito |
+| 2A | [API de pastas e ficheiros](2026-10-03-02a-api-pastas-ficheiros.md) | Pastas (listar, criar, renomear, mover, excluir vazias), upload com quota atómica, descarregar, pré-visualizar, renomear, mover e excluir ficheiros; isolamento entre utilizadores | Concluído |
 | 2B | Interface "Meu espaço" | Lista, caminho (*breadcrumb*), nova pasta, upload com progresso, menu de ações, mover, pré-visualização | Por escrever |
 | 3 | Lixeira, pesquisa e partilha | Lixeira com restauro, pesquisa por nome, links públicos e página `/s/:token` | Por escrever |
 | 4 | Admin e manutenção | Painel de utilizadores e quotas, remoção de contas, cron de limpeza | Por escrever |
@@ -49,13 +49,16 @@ Resultado da revisão final do ramo do Plano 1 (achados diferidos de propósito)
 - Novo: um 409 `name_taken` pode vir de um upload `pending` invisível: a mensagem deve sugerir isso.
 - Novo: no diálogo "Mover", desativar a própria pasta e as suas descendentes.
 
+- Novo (re-revisão final do 2A): `test/names.test.ts` tem caracteres invisíveis literais (U+0301, NBSP, BOM, bidi U+202E, ZWJ) em vez de escapes `\u…`: trocar por escapes (o GitHub mostra um aviso de Unicode bidirecional) e manter as guardas.
+- Novo: `POST /api/folders` não limita a profundidade. As consultas recursivas ficam limitadas a 1000 níveis, mas mover para uma zona mais funda dá `invalid_move` com uma mensagem enganadora: limitar a profundidade ao criar/mover (por exemplo 100) e dizer isso na mensagem.
+
 **Plano 3 (lixeira, pesquisa, partilha)**
 - Decrementos de quota com `MAX(used_bytes - ?, 0)`, para um desvio de contabilidade não fazer falhar a `batch` para sempre.
 - Testes de `shares` (`token_hash` único, `ON DELETE CASCADE` de `file_id`).
 - Novo (revisão final do 2A): montar o `jsonBodyLimit` por construção (global em `/api/*`, exceto `PUT /api/files`), em vez de rota a rota.
 - Novo: na pesquisa, calcular os caminhos dos até 50 resultados numa só consulta (nunca um `breadcrumbFor` por resultado: o limite do plano gratuito é 50 subpedidos por invocação).
 - Novo: nos decrementos de quota, preferir `UPDATE ... WHERE EXISTS (linha)` antes do `DELETE` a depender de `changes()` entre instruções da `batch`.
-- Novo: extrair de `routes/files.ts` os helpers de servir ficheiros (cabeçalhos, `parseRange`, `missingObject`) para o descarregamento público.
+- Novo: extrair de `routes/files.ts` os helpers de servir ficheiros (cabeçalhos e `missingObject`; o `parseRange` já está em `lib/files.ts`) para o descarregamento público.
 - Novo: no restauro com sufixo, respeitar o limite de 255 e as linhas `pending`.
 
 **Plano 4 (admin e manutenção)**
