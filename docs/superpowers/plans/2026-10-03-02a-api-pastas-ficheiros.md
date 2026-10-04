@@ -2548,7 +2548,7 @@ describe("GET /api/files/:id/preview", () => {
 
   it("recusa com 415 SVG, HTML, texto e nomes sem extensão", async () => {
     const { cookie } = await registerUser("ana@example.com");
-    for (const name of ["a.svg", "b.html", "c.txt", "png", ".png", "d.png.exe"]) {
+    for (const name of ["a.svg", "b.html", "c.txt", "png", ".png", "d.png.exe", "e.constructor", "f.__proto__"]) {
       const file = await uploadOk(cookie, name, "x");
       const res = await api(`/api/files/${file.id}/preview`, { cookie });
       expect(res.status, name).toBe(415);
@@ -2718,7 +2718,8 @@ const PREVIEW_TYPES: Record<string, string> = {
 export function previewContentType(name: string): string | null {
   const dot = name.lastIndexOf(".");
   if (dot <= 0) return null; // sem extensão, ou um ficheiro escondido como ".png"
-  return PREVIEW_TYPES[name.slice(dot + 1).toLowerCase()] ?? null;
+  const extension = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(PREVIEW_TYPES, extension) ? PREVIEW_TYPES[extension] : null;
 }
 
 /** `Content-Disposition` com `filename` ASCII de recurso e `filename*` em UTF-8 (RFC 5987). */
@@ -3287,7 +3288,8 @@ const PREVIEW_TYPES: Record<string, string> = {
 export function previewContentType(name: string): string | null {
   const dot = name.lastIndexOf(".");
   if (dot <= 0) return null; // sem extensão, ou um ficheiro escondido como ".png"
-  return PREVIEW_TYPES[name.slice(dot + 1).toLowerCase()] ?? null;
+  const extension = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(PREVIEW_TYPES, extension) ? PREVIEW_TYPES[extension] : null;
 }
 
 /** `Content-Disposition` com `filename` ASCII de recurso e `filename*` em UTF-8 (RFC 5987). */
@@ -3702,3 +3704,4 @@ git commit -m "Documenta a API de pastas e ficheiros e regista o Plano 2A" -m "C
 ## Notas da execução
 
 - **Task 5 corrigida na revisão:** `releaseReservation` só apaga o objeto do R2 se a linha `pending` foi mesmo apagada (se a linha já está `ready` o objeto é o conteúdo do ficheiro) e regista a falha do `delete` em vez de a engolir; o teste da conta suspensa passou a exercitar a cláusula `status = 'active'` da reserva (simulando a suspensão entre a autenticação e a reserva); os literais NFD dos testes de normalização passaram a escapes `́` com guarda; e entraram os testes do caminho de falha e das listagens de ficheiros. O código e os testes desta secção do plano já refletem isso.
+- **Task 6 corrigida na revisão:** `previewContentType` usa `Object.hasOwn(PREVIEW_TYPES, extension)`: com `PREVIEW_TYPES[extension] ?? null` um ficheiro chamado `a.constructor` ou `a.__proto__` devolvia a função `Object` e a pré-visualização rebentava com 500 em vez de 415; o teste de 415 passou a incluir esses dois nomes. O código desta secção e da Task 7 já reflete isso.
