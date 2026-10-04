@@ -55,7 +55,9 @@ test/          testes
 
 ## API (pastas e ficheiros)
 
-Todas as rotas exigem sessão (cookie `sw_session`); os pedidos que alteram dados exigem `Origin`. Os erros vêm em `{ "error": "<código>", "message": "<texto>" }`.
+Todas as rotas desta secção exigem sessão (cookie `sw_session`). Em toda a API só são públicas `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout` e `GET /api/health`. Os pedidos que alteram dados (`POST`, `PUT`, `PATCH`, `DELETE`) exigem o cabeçalho `Origin`, que tem de coincidir com a origem do pedido (senão 403 `forbidden_origin`). Os erros vêm em `{ "error": "<código>", "message": "<texto>" }`.
+
+`parentId` (pastas) e `folderId` (ficheiros) aceitam `null` ou `"root"` para a raiz; no upload, omitir `folder` também significa a raiz.
 
 | Pedido | Descrição |
 |---|---|
@@ -64,7 +66,7 @@ Todas as rotas exigem sessão (cookie `sw_session`); os pedidos que alteram dado
 | `POST /api/folders` | Cria uma pasta (`{ name, parentId? }`) |
 | `PATCH /api/folders/:id` | Renomeia e/ou move (`{ name?, parentId? }`) |
 | `DELETE /api/folders/:id` | Apaga uma pasta, só se estiver vazia |
-| `PUT /api/files?name=&folder=` | Upload (ficheiro no corpo, `Content-Length` obrigatório, máx. 100 MB) |
+| `PUT /api/files?name=&folder=` | Upload (ficheiro no corpo, `Content-Length` obrigatório, máx. 100 MiB, configurável por `MAX_UPLOAD_BYTES`) |
 | `GET /api/files/:id/download` | Descarrega (sempre como anexo) |
 | `GET /api/files/:id/preview` | Pré-visualiza imagens e PDF (suporta `Range`) |
 | `PATCH /api/files/:id` | Renomeia e/ou move (`{ name?, folderId? }`) |

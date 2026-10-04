@@ -68,8 +68,13 @@ IDs: `crypto.randomUUID()` (texto). Datas: inteiros (milissegundos Unix). As cha
 
 ### Regras de nomes
 
-- 1 a 255 caracteres, sem `/`, sem caracteres de controlo, diferentes de `.` e `..`, com espaços nas pontas removidos.
+- Antes de validar e gravar, o nome passa para Unicode NFC e perde os espaços das pontas (`trim`, que também tira NBSP e BOM das pontas).
+- 1 a 255 caracteres, contados em unidades UTF-16 (um emoji conta 2), diferentes de `.` e `..`, sem `/`.
+- Sem caracteres de controlo C0 e C1 (incluindo `DEL`), sem controlos de direção do texto (U+061C, U+200E, U+200F, U+202A a U+202E, U+2066 a U+2069) e sem *surrogates* isolados. Os controlos de direção não são permitidos porque `ab<U+202E>txt.exe` apareceria no ecrã como `abexe.txt` (e a página pública de partilha mostra o nome a terceiros); um *surrogate* isolado não é texto válido e a D1 grava-o como U+FFFD, o que faria a resposta e a base divergir.
+- Os nomes distinguem maiúsculas de minúsculas (`Fotos` e `fotos` coexistem): o índice único é sobre `name`. `name_norm` serve só para ordenar e pesquisar.
 - Nomes únicos dentro da mesma pasta (entre itens não apagados). Um conflito devolve 409.
+- Uma pasta e um ficheiro com o mesmo nome no mesmo sítio são permitidos: são tabelas e índices únicos separados.
+- Um upload `pending` ocupa o nome até terminar ou até o cron de manutenção o limpar (até 1 hora): um novo upload ou renomeação para esse nome devolve 409 mesmo sem o ficheiro aparecer na listagem.
 
 ## 4. Autenticação e segurança
 

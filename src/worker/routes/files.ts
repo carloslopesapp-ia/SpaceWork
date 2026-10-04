@@ -38,7 +38,9 @@ function parseContentLength(raw: string | undefined): number {
  * 1. Reserva atómica numa só `batch`: insere a linha `pending` só se couber na quota e, só então,
  *    soma o tamanho a `used_bytes` (pedidos em paralelo não conseguem ultrapassar a quota).
  * 2. Grava os bytes no R2 em *stream* (o R2 exige o tamanho conhecido, por isso o Content-Length é obrigatório).
- * 3. Passa a linha a `ready`. Se o passo 2 ou 3 falhar, liberta a reserva.
+ * 3. Passa a linha a `ready`. Se o passo 2 ou 3 falhar, tenta libertar a reserva, mas só se a linha ainda
+ *    estiver `pending` (apaga-a, devolve o espaço e só então apaga o objeto do R2). Se já está `ready`, o
+ *    ficheiro existe e nada se desfaz (ver `releaseReservation`).
  */
 files.put("/", async (c) => {
   const db = c.env.DB;
