@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { FolderItem } from "../../shared/types";
@@ -14,7 +14,8 @@ const TREE = [folder("docs", "Docs", null), folder("fotos", "Fotos", null), fold
 function setup(props: Partial<Parameters<typeof MoveDialog>[0]> = {}) {
   const onSubmit = vi.fn();
   const onClose = vi.fn();
-  const Wrapper = queryWrapper(testQueryClient());
+  const client = testQueryClient();
+  const Wrapper = queryWrapper(client);
   render(
     <Wrapper>
       <MoveDialog
@@ -28,10 +29,10 @@ function setup(props: Partial<Parameters<typeof MoveDialog>[0]> = {}) {
       />
     </Wrapper>,
   );
-  return { onSubmit, onClose, user: userEvent.setup() };
+  return { onSubmit, onClose, client, user: userEvent.setup() };
 }
 
-const optionTexts = () => screen.getAllByRole("option").map((option) => (option.textContent ?? "").replace(/ /g, "·"));
+const optionTexts = () => screen.getAllByRole("option").map((option) => (option.textContent ?? "").replace(/\u00a0/g, "·"));
 
 describe("MoveDialog", () => {
   it("lista a raiz e as pastas recuadas, com a pasta atual desativada", async () => {
@@ -95,5 +96,23 @@ describe("MoveDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
     await user.click(screen.getByRole("button", { name: "Tentar novamente" }));
     expect(await screen.findByRole("combobox", { name: "Pasta de destino" })).toBeInTheDocument();
+  });
+
+  it("um refetch da lista que falha em segundo plano deixa o formulário e a escolha no ecrã", async () => {
+    let failing = false;
+    mockApi({
+      "GET /api/folders/tree": () => (failing ? apiError(500, "internal_error", "Erro interno do servidor.") : json({ folders: TREE })),
+    });
+    const { client, user } = setup();
+    const select = await screen.findByRole("combobox", { name: "Pasta de destino" });
+    await user.selectOptions(select, "ferias");
+
+    failing = true;
+    await act(() => client.invalidateQueries({ queryKey: ["tree"] }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // o React Query avisa os componentes no tick seguinte
+
+    expect(client.getQueryState(["tree"])?.status).toBe("error"); // o refetch falhou mesmo
+    expect(screen.getByRole("combobox", { name: "Pasta de destino" })).toHaveValue("ferias");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

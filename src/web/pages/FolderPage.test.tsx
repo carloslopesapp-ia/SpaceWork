@@ -79,6 +79,32 @@ describe("FolderPage: listagem", () => {
     await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
     expect(await screen.findByRole("link", { name: "Fotos" })).toBeInTheDocument();
   });
+
+  it("um refetch falhado em segundo plano mantém a lista e o diálogo aberto, e avisa por cima da lista", async () => {
+    let failing = false;
+    mockApi({
+      ...SESSION,
+      "GET /api/folders/:id/contents": () => (failing ? apiError(500, "internal_error", "Erro interno do servidor.") : json(ROOT)),
+    });
+    const user = userEvent.setup();
+    const { client } = renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Nova pasta" }));
+    await user.type(screen.getByLabelText("Nome da pasta"), "Doc");
+
+    failing = true;
+    await act(() => client.invalidateQueries({ queryKey: ["folder"] }));
+
+    expect(await screen.findByText("Erro interno do servidor.")).toBeInTheDocument();
+    expect(client.getQueryState(["folder", "root"])?.status).toBe("error"); // o refetch falhou mesmo
+    expect(screen.getByRole("link", { name: "Fotos" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Nome da pasta")).toHaveValue("Doc");
+
+    failing = false;
+    await user.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    await waitFor(() => expect(screen.queryByText("Erro interno do servidor.")).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Fotos" })).toBeInTheDocument();
+  });
 });
 
 describe("FolderPage: nova pasta", () => {
@@ -235,7 +261,8 @@ describe("FolderPage: envio e pré-visualização", () => {
     markUploaded();
     act(() => Xhr.instances[0].respond(201, { file: NEW_FILE }));
     expect(await screen.findByText("Concluído")).toBeInTheDocument();
-    expect(await screen.findByText("nota.txt", { selector: "span" })).toBeInTheDocument();
+    // Só existe na linha da lista (o `<span>` do painel de envios também diz «nota.txt»).
+    expect(await screen.findByRole("button", { name: "Ações para o ficheiro nota.txt" })).toBeInTheDocument();
   });
 
   it("arrastar e largar ficheiros envia-os para a pasta atual", async () => {

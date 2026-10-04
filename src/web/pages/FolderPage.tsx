@@ -26,9 +26,12 @@ export default function FolderPage() {
   // `dragenter`/`dragleave` disparam também ao passar por cima dos filhos: conta-se a profundidade.
   const dragDepth = useRef(0);
 
+  const gone = contents.error instanceof ApiRequestError && contents.error.code === "folder_not_found";
+
   if (contents.isPending) return <p className="text-slate-500">A carregar…</p>;
-  if (contents.isError) {
-    const gone = contents.error instanceof ApiRequestError && contents.error.code === "folder_not_found";
+  // O ecrã de erro completo só quando não há nada para mostrar (ainda sem dados, ou a pasta já não existe): um refetch
+  // falhado em segundo plano mantém a lista (e os diálogos abertos) e avisa por cima dela.
+  if (contents.isError && (gone || contents.data === undefined)) {
     return (
       <div className="max-w-md space-y-4">
         <Message kind="error">{gone ? "Esta pasta não existe ou foi eliminada." : errorMessage(contents.error)}</Message>
@@ -103,6 +106,15 @@ export default function FolderPage() {
           />
         </div>
       </div>
+
+      {contents.isError && (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Message kind="error">{errorMessage(contents.error)}</Message>
+          <Button variant="secondary" onClick={() => void contents.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
 
       {notice && (
         <div className="mt-4">

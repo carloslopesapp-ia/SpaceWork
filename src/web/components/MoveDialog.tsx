@@ -41,7 +41,7 @@ export function MoveDialog({ title, currentFolderId, movingFolderId, pending, er
     <Modal title={title} onClose={onClose}>
       {tree.isPending ? (
         <p className="text-sm text-slate-500">A carregar pastas…</p>
-      ) : tree.isError ? (
+      ) : tree.isError && tree.data === undefined ? (
         <div className="space-y-3">
           <Message kind="error">{errorMessage(tree.error)}</Message>
           <Button variant="secondary" onClick={() => void tree.refetch()}>
@@ -65,7 +65,7 @@ export function MoveDialog({ title, currentFolderId, movingFolderId, pending, er
                 const disabled = here || (option.id !== null && blocked.has(option.id));
                 return (
                   <option key={option.id ?? ROOT_VALUE} value={option.id ?? ROOT_VALUE} disabled={disabled}>
-                    {"  ".repeat(option.depth)}
+                    {"\u00a0\u00a0".repeat(option.depth)}
                     {option.name}
                     {here ? " (pasta atual)" : ""}
                   </option>
