@@ -18,8 +18,10 @@ import { readJsonObject, readString } from "../lib/http";
 import { parseName } from "../lib/names";
 import { attachmentResponse, missingObject } from "../lib/serve";
 import { createAuthedRouter } from "./authed";
+import { addFileShareRoutes } from "./file-shares";
 
 export const files = createAuthedRouter();
+addFileShareRoutes(files);
 
 function parseContentLength(raw: string | undefined): number {
   const size = raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
