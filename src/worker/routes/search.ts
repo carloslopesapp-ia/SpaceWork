@@ -20,14 +20,13 @@ interface SearchRow {
   created_at: number;
 }
 
-/** O texto como padrão de `LIKE ... ESCAPE '\'`: `%`, `_` e `\` do utilizador valem como letras. */
-function containsPattern(key: string): string {
-  return `%${key.replace(/[\\%_]/g, "\\$&")}%`;
-}
-
 /**
  * Pesquisa por nome (sem maiúsculas nem acentos) nas pastas e nos ficheiros prontos e fora da lixeira do utilizador:
  * mínimo 2 caracteres, no máximo 50 resultados, por ordem de nome. Cada resultado traz o caminho da pasta onde está.
+ *
+ * Usa `instr` em vez de `LIKE` porque a D1 limita padrões de `LIKE` a 50 bytes, e o simulador local não o aplica.
+ * Assim garantimos compatibilidade com a D1 real para pesquisas até 100 caracteres.
+ * O `instr` trata `%`, `_` e `\` como caracteres literais, como pretendido.
  */
 search.get("/", async (c) => {
   const db = c.env.DB;
@@ -44,13 +43,13 @@ search.get("/", async (c) => {
   const { results: rows } = await db
     .prepare(
       `SELECT 'folder' AS kind, id, parent_id AS container_id, name, name_norm, 0 AS size, '' AS mime, created_at
-         FROM folders WHERE user_id = ?1 AND name_norm LIKE ?2 ESCAPE '\\'
+         FROM folders WHERE user_id = ?1 AND instr(name_norm, ?2) > 0
        UNION ALL
        SELECT 'file', id, folder_id, name, name_norm, size, mime, created_at
-         FROM files WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NULL AND name_norm LIKE ?2 ESCAPE '\\'
+         FROM files WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NULL AND instr(name_norm, ?2) > 0
        ORDER BY name_norm, name LIMIT ${MAX_RESULTS}`,
     )
-    .bind(userId, containsPattern(key))
+    .bind(userId, key)
     .all<SearchRow>();
 
   const paths = await pathsForFolders(
