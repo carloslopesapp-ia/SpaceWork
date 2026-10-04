@@ -53,4 +53,21 @@ src/shared/    tipos e funções partilhadas
 test/          testes
 ```
 
+## API (pastas e ficheiros)
+
+Todas as rotas exigem sessão (cookie `sw_session`); os pedidos que alteram dados exigem `Origin`. Os erros vêm em `{ "error": "<código>", "message": "<texto>" }`.
+
+| Pedido | Descrição |
+|---|---|
+| `GET /api/folders/:id/contents` | Conteúdo de uma pasta (`root` = raiz): pasta, caminho, subpastas e ficheiros |
+| `GET /api/folders/tree` | Todas as pastas do utilizador |
+| `POST /api/folders` | Cria uma pasta (`{ name, parentId? }`) |
+| `PATCH /api/folders/:id` | Renomeia e/ou move (`{ name?, parentId? }`) |
+| `DELETE /api/folders/:id` | Apaga uma pasta, só se estiver vazia |
+| `PUT /api/files?name=&folder=` | Upload (ficheiro no corpo, `Content-Length` obrigatório, máx. 100 MB) |
+| `GET /api/files/:id/download` | Descarrega (sempre como anexo) |
+| `GET /api/files/:id/preview` | Pré-visualiza imagens e PDF (suporta `Range`) |
+| `PATCH /api/files/:id` | Renomeia e/ou move (`{ name?, folderId? }`) |
+| `DELETE /api/files/:id` | Manda o ficheiro para a lixeira |
+
 Não fazer `git push` sem confirmação do dono do projeto.
