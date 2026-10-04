@@ -60,6 +60,15 @@ describe("PATCH /api/folders/:id (renomear)", () => {
     expect((await patch(cookie, a.id, { name: "A" })).status).toBe(200);
   });
 
+  it("recusa um surrogate isolado no nome (400 invalid_name): a D1 gravaria U+FFFD e a resposta divergiria da base", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await createFolder(cookie, "A");
+    const res = await patch(cookie, a.id, { name: "\ud800.txt" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_name" });
+    expect((await getContents(cookie)).folders.map((f) => f.name)).toEqual(["A"]);
+  });
+
   it("exige name e/ou parentId", async () => {
     const { cookie } = await registerUser("ana@example.com");
     const a = await createFolder(cookie, "A");

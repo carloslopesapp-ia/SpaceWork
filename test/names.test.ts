@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { NAME_MAX_LENGTH, normalizeName, searchKey, validateName } from "../src/shared/names";
 
+// Os nomes com acentos decompostos (NFD) escrevem-se com escapes: um editor podia compô-los sem avisar.
+const RELATORIO_NFD = "Relatório"; // o + acento agudo combinado
+const RELATORIO_NFC = "Relatório"; // ó
+
 describe("normalizeName", () => {
   it("remove espaços nas pontas e passa para Unicode NFC", () => {
     expect(normalizeName("  Relatório  ")).toBe("Relatório");
-    const decomposed = "Relatório"; // o + acento combinado
-    const composed = "Relatório";
-    expect(decomposed).not.toBe(composed);
-    expect(normalizeName(decomposed)).toBe(composed);
+    expect(RELATORIO_NFD).not.toBe(RELATORIO_NFD.normalize("NFC")); // guarda: o literal tem de continuar decomposto
+    expect(normalizeName(RELATORIO_NFD)).toBe(RELATORIO_NFC);
+  });
+
+  it("o trim também tira o NBSP e o BOM das pontas, mas não do meio (comportamento atual)", () => {
+    expect(normalizeName(" a﻿")).toBe("a");
+    expect(normalizeName(" a ")).toBe("a");
+    expect(normalizeName("a b")).toBe("a b");
+    expect(validateName(normalizeName("a b"))).toBeNull();
   });
 });
 
@@ -27,6 +36,11 @@ describe("validateName", () => {
     expect(validateName("a".repeat(NAME_MAX_LENGTH + 1))).toMatch(/mais de 255/);
   });
 
+  it("conta o limite em unidades UTF-16: um emoji vale 2", () => {
+    expect(validateName("🏖".repeat(127) + "a")).toBeNull(); // 254 + 1 = 255
+    expect(validateName("🏖".repeat(128))).toMatch(/mais de 255/); // 256
+  });
+
   it("rejeita '.' e '..'", () => {
     expect(validateName(".")).toBe("Nome inválido.");
     expect(validateName("..")).toBe("Nome inválido.");
@@ -38,6 +52,28 @@ describe("validateName", () => {
     expect(validateName("a\nb")).toMatch(/controlo/);
     expect(validateName("a\u007fb")).toMatch(/controlo/);
   });
+
+  it("rejeita os controlos C0 e C1 e aceita o que está logo ao lado dos limites", () => {
+    expect(validateName("a\u001fb")).toMatch(/controlo/); // último C0
+    expect(validateName("a b")).toBeNull(); // U+0020, o espaço
+    expect(validateName("a\u0080b")).toMatch(/controlo/); // primeiro C1
+    expect(validateName("a\u009fb")).toMatch(/controlo/); // último C1
+    expect(validateName("a b")).toBeNull(); // U+00A0, o NBSP
+  });
+
+  it("rejeita os controlos de direção do texto (um nome como 'ab\\u202etxt.exe' apareceria no ecrã como 'abexe.txt')", () => {
+    for (const char of ["؜", "‎", "‏", "‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩"]) {
+      expect(validateName(`ab${char}txt.exe`), `U+${char.codePointAt(0)?.toString(16)}`).toMatch(/controlo/);
+    }
+    expect(validateName("a‍b")).toBeNull(); // o ZWJ (emojis compostos) não é um controlo de direção
+  });
+
+  it("rejeita surrogates isolados (a D1 gravava-os como U+FFFD) e aceita pares válidos", () => {
+    for (const name of ["\ud800", "a\ud800b", "a\udfffb", "a\udfd6\ud83cb", "ab\ud83c"]) {
+      expect(validateName(name), JSON.stringify(name)).toMatch(/inválidos/);
+    }
+    expect(validateName("a🏖b")).toBeNull(); // 🏖 como par substituto válido
+  });
 });
 
 describe("searchKey", () => {
@@ -47,6 +83,8 @@ describe("searchKey", () => {
   });
 
   it("dá a mesma chave para texto composto e decomposto", () => {
-    expect(searchKey("Relatório")).toBe(searchKey("Relatório"));
+    expect(RELATORIO_NFD).not.toBe(RELATORIO_NFD.normalize("NFC")); // guarda: o literal tem de continuar decomposto
+    expect(searchKey(RELATORIO_NFD)).toBe(searchKey(RELATORIO_NFC));
+    expect(searchKey(RELATORIO_NFD)).toBe("relatorio");
   });
 });

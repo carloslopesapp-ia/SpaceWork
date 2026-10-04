@@ -47,6 +47,15 @@ describe("PATCH /api/files/:id (renomear)", () => {
     expect((await patch(cookie, a.id, { name: "a.txt" })).status).toBe(200);
   });
 
+  it("recusa um surrogate isolado no nome (400 invalid_name): a D1 gravaria U+FFFD e a resposta divergiria da base", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    const a = await uploadOk(cookie, "a.txt", "x");
+    const res = await patch(cookie, a.id, { name: "\ud800.txt" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_name" });
+    expect((await getContents(cookie)).files.map((f) => f.name)).toEqual(["a.txt"]);
+  });
+
   it("exige name e/ou folderId", async () => {
     const { cookie } = await registerUser("ana@example.com");
     const a = await uploadOk(cookie, "a.txt", "x");
