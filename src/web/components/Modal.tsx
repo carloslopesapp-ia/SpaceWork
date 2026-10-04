@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 interface ModalProps {
   title: string;
@@ -17,16 +17,16 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 export function Modal({ title, onClose, children, wide = false }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
 
   useEffect(() => {
     const dialog = dialogRef.current!;
-    const opener = document.activeElement as HTMLElement | null;
     // Um campo com `autoFocus` já tem o foco; senão, o primeiro botão ou campo (ou o próprio diálogo).
     if (!dialog.contains(document.activeElement)) {
       (dialog.querySelector<HTMLElement>(FOCUSABLE) ?? dialog).focus();
     }
     return () => opener?.focus();
-  }, []);
+  }, [opener]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { NameDialog } from "./NameDialog";
 
@@ -59,5 +60,33 @@ describe("NameDialog", () => {
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("Esc fecha e devolve o foco ao botão que o abriu (regressão: autoFocus)", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Abrir diálogo</button>
+          {open && (
+            <NameDialog
+              title="Renomear pasta"
+              label="Nome da pasta"
+              confirmLabel="Renomear"
+              pending={false}
+              error={null}
+              onSubmit={() => {}}
+              onClose={() => setOpen(false)}
+            />
+          )}
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Abrir diálogo" });
+    await user.click(opener);
+    await user.keyboard("{Escape}");
+    expect(opener).toHaveFocus();
   });
 });
