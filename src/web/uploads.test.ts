@@ -92,6 +92,30 @@ describe("UploadManager", () => {
     expect(sent.map((s) => s.file.name)).toEqual(["pequeno"]);
   });
 
+  it("recusa logo, sem enviar, um ficheiro com um nome que o servidor rejeitaria", () => {
+    const { manager, sent } = setup(5);
+    manager.add(
+      [file("a/b.txt", 1), file("\u202e.txt", 1), file("   ", 1), file("ok.txt", 1), file("enorme/\u202e", 6)],
+      null,
+    );
+    expect(statuses(manager)).toEqual(["a/b.txt:error", "\u202e.txt:error", "   :error", "ok.txt:uploading", "enorme/\u202e:error"]);
+    expect(manager.getSnapshot().map((item) => item.message)).toEqual([
+      "O nome não pode conter a barra (/).",
+      "O nome não pode conter caracteres de controlo.",
+      "O nome não pode estar vazio.",
+      undefined,
+      "O ficheiro excede o limite de 5 B.", // o tamanho vem primeiro
+    ]);
+    expect(sent.map((s) => s.file.name)).toEqual(["ok.txt"]); // o `upload` nem foi chamado para os outros
+  });
+
+  it("envia o nome tal como está (o servidor normaliza) quando o nome normalizado é válido", () => {
+    const { manager, sent } = setup();
+    manager.add([file(" nota.txt ")], null);
+    expect(statuses(manager)).toEqual([" nota.txt :uploading"]);
+    expect(sent[0].file.name).toBe(" nota.txt ");
+  });
+
   it("fixa a pasta de destino quando o ficheiro entra na fila", () => {
     const { manager, sent } = setup();
     manager.add([file("a")], "pasta-1");

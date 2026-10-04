@@ -1,4 +1,5 @@
 import { formatBytes } from "../shared/format";
+import { normalizeName, validateName } from "../shared/names";
 import { ApiRequestError, errorMessage } from "./api";
 import { ABORTED_CODE, uploadFile, type UploadHandle } from "./upload";
 
@@ -61,8 +62,12 @@ export class UploadManager {
     const added: UploadItem[] = [];
     for (const file of files) {
       const base = { id: `upload-${this.nextId++}`, name: file.name, size: file.size, folderId, loaded: 0 };
-      if (file.size > max) {
-        added.push({ ...base, status: "error", message: `O ficheiro excede o limite de ${formatBytes(max)}.` });
+      // O tamanho vem primeiro. O nome é validado como o servidor o faz (normalizado), mas envia-se `file.name` tal
+      // como está: o servidor normaliza outra vez.
+      const problem =
+        file.size > max ? `O ficheiro excede o limite de ${formatBytes(max)}.` : validateName(normalizeName(file.name));
+      if (problem !== null) {
+        added.push({ ...base, status: "error", message: problem });
       } else {
         this.files.set(base.id, file);
         added.push({ ...base, status: "queued" });

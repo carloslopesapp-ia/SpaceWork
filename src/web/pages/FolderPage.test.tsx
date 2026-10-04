@@ -189,6 +189,49 @@ describe("FolderPage: nova pasta", () => {
   });
 });
 
+describe("FolderPage: estado por pasta", () => {
+  const serveFolders = () =>
+    mockApi({
+      ...SESSION,
+      "GET /api/folders/:id/contents": ({ params }) => json(params.id === "root" ? ROOT : FOTOS),
+    });
+  /** Muda de pasta pela barra lateral, sem passar pelo diálogo (como o botão «Voltar» do browser). */
+  const goToRoot = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(within(screen.getByRole("navigation", { name: "Principal" })).getByRole("link", { name: "Meu espaço" }));
+
+  it("o diálogo «Nova pasta» aberto não passa para a pasta seguinte", async () => {
+    serveFolders();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Nova pasta" }));
+    expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
+
+    await goToRoot(user);
+
+    expect(await screen.findByRole("link", { name: "Fotos" })).toBeInTheDocument(); // a raiz já carregou
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("o aviso das pastas largadas desaparece ao mudar de pasta", async () => {
+    serveFolders();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    const heading = await screen.findByRole("heading", { name: "Fotos" });
+    fireEvent.drop(heading, {
+      dataTransfer: {
+        types: ["Files"],
+        items: [{ kind: "file", getAsFile: () => new File([""], "Pasta"), webkitGetAsEntry: () => ({ isDirectory: true }) }],
+      },
+    });
+    expect(screen.getByText("As pastas não se enviam: arraste os ficheiros.")).toBeInTheDocument();
+
+    await goToRoot(user);
+
+    expect(await screen.findByRole("link", { name: "Fotos" })).toBeInTheDocument();
+    expect(screen.queryByText("As pastas não se enviam: arraste os ficheiros.")).not.toBeInTheDocument();
+  });
+});
+
 describe("FolderPage: ações das linhas", () => {
   it("renomear uma pasta atualiza a lista", async () => {
     let name = "Fotos";

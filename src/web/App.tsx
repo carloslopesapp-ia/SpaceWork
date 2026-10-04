@@ -1,9 +1,17 @@
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useParams } from "react-router";
 import AppLayout from "./components/AppLayout";
 import AccountPage from "./pages/AccountPage";
 import FolderPage from "./pages/FolderPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+
+/**
+ * A raiz e `/pasta/:folderId` partilham o mesmo `FolderPage` na árvore do React, que por isso manteria o estado ao mudar
+ * de pasta (o diálogo «Nova pasta» aberto, o aviso das pastas largadas, o erro da mutação): a `key` recomeça a página.
+ */
+function FolderRoute() {
+  return <FolderPage key={useParams().folderId ?? "root"} />;
+}
 
 export default function App() {
   return (
@@ -11,8 +19,8 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/registo" element={<RegisterPage />} />
       <Route element={<AppLayout />}>
-        <Route index element={<FolderPage />} />
-        <Route path="pasta/:folderId" element={<FolderPage />} />
+        <Route index element={<FolderRoute />} />
+        <Route path="pasta/:folderId" element={<FolderRoute />} />
         <Route path="conta" element={<AccountPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

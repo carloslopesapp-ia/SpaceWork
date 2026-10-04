@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { errorMessage } from "../api";
 import { useLogout, useMe } from "../auth";
@@ -18,6 +19,22 @@ export default function AppLayout() {
   const me = useMe();
   const logout = useLogout();
   const { pathname } = useLocation();
+  const signedIn = Boolean(me.data);
+
+  // Um ficheiro largado fora da zona de largar fá-lo o browser abrir, e a aplicação perde-se: a janela impede-o. A zona
+  // de largar da página continua a tratar do envio; isto só tira o comportamento por defeito (e só para ficheiros).
+  useEffect(() => {
+    if (!signedIn) return;
+    const guard = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
+    window.addEventListener("dragover", guard);
+    window.addEventListener("drop", guard);
+    return () => {
+      window.removeEventListener("dragover", guard);
+      window.removeEventListener("drop", guard);
+    };
+  }, [signedIn]);
 
   if (me.isPending) return <p className="p-8 text-slate-500">A carregar…</p>;
   // Só quando ainda não há dados: um refetch falhado em segundo plano não pode desmontar a aplicação (e a fila de envios).
@@ -64,7 +81,8 @@ export default function AppLayout() {
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-6 md:p-8">
-        <UploadsProvider>
+        {/* `key`: se o `me` passar a outro utilizador no mesmo separador, a fila do anterior cancela-se (`cancelAll`). */}
+        <UploadsProvider key={user.id}>
           <Outlet />
           <UploadPanel />
         </UploadsProvider>

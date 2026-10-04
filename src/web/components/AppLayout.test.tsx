@@ -1,9 +1,10 @@
-import { act, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NETWORK_ERROR_MESSAGE } from "../api";
 import { ME_KEY } from "../auth";
-import { apiError, json, ME, mockApi, noContent } from "../test/mock-api";
+import { stubXhr } from "../test/fake-xhr";
+import { apiError, json, ME, mockApi, noContent, SESSION } from "../test/mock-api";
 import { renderApp } from "../test/render";
 
 const EMPTY = { folder: null, breadcrumb: [], folders: [], files: [] };
@@ -84,9 +85,63 @@ describe("AppLayout", () => {
 
     failing = true;
     await act(() => client.invalidateQueries({ queryKey: ME_KEY }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // o React Query avisa os componentes no tick seguinte
 
     expect(client.getQueryState(ME_KEY)?.status).toBe("error"); // o refetch falhou mesmo
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  describe("guarda de largar ao nível da janela", () => {
+    /** Dispara o evento em `document.body` (fora de qualquer zona de largar) e diz se o browser foi impedido de agir. */
+    function prevented(type: "dragOver" | "drop", types: string[]): boolean {
+      const event = createEvent[type](document.body, { dataTransfer: { types } });
+      fireEvent(document.body, event);
+      return event.defaultPrevented;
+    }
+
+    it("um ficheiro largado fora da zona não abre no browser; o que não é ficheiro não é tocado", async () => {
+      mockApi({ ...SESSION, ...CONTENTS });
+      renderApp("/");
+      await screen.findByRole("navigation", { name: "Principal" });
+
+      expect(prevented("dragOver", ["Files"])).toBe(true);
+      expect(prevented("drop", ["Files"])).toBe(true);
+      expect(prevented("dragOver", ["text/plain"])).toBe(false);
+      expect(prevented("drop", ["text/plain"])).toBe(false);
+    });
+
+    it("sem sessão (no login) não há guarda, e ao sair da área autenticada deixa de haver", async () => {
+      mockApi({ ...SESSION, ...CONTENTS });
+      renderApp("/");
+      await screen.findByRole("navigation", { name: "Principal" });
+      expect(prevented("drop", ["Files"])).toBe(true);
+
+      cleanup(); // desmonta a aplicação
+      expect(prevented("drop", ["Files"])).toBe(false);
+
+      mockApi({ "GET /api/auth/me": () => apiError(401, "unauthorized", "Sessão inválida ou expirada.") });
+      renderApp("/");
+      await screen.findByRole("heading", { name: "Entrar" });
+      expect(prevented("drop", ["Files"])).toBe(false);
+    });
+  });
+
+  it("se o `me` passa a outro utilizador no mesmo separador, a fila de envios é cancelada", async () => {
+    const Xhr = stubXhr();
+    mockApi({ ...SESSION, ...CONTENTS });
+    const user = userEvent.setup();
+    const { client } = renderApp("/");
+    await screen.findByRole("heading", { name: "Meu espaço" });
+    await user.upload(screen.getByLabelText("Escolher ficheiros"), new File(["abc"], "nota.txt"));
+    expect(Xhr.instances).toHaveLength(1);
+    const abort = vi.spyOn(Xhr.instances[0], "abort");
+    expect(await screen.findByRole("progressbar", { name: "Envio de nota.txt" })).toBeInTheDocument();
+
+    act(() => client.setQueryData(ME_KEY, { ...ME, id: "u2", email: "outra@example.com" }));
+
+    expect(await screen.findByText("outra@example.com")).toBeInTheDocument(); // o React Query avisa os componentes no tick seguinte
+    await waitFor(() => expect(abort).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole("progressbar", { name: "Envio de nota.txt" })).not.toBeInTheDocument());
   });
 });
