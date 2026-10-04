@@ -10,7 +10,7 @@ import { RowMenu, type MenuAction } from "./RowMenu";
 type Dialog = "rename" | "move" | "delete";
 
 /** O menu «⋮» de um ficheiro: descarregar e os diálogos de renomear, mover e excluir. */
-export function FileActions({ file }: { file: FileItem }) {
+export function FileActions({ file, onPreview }: { file: FileItem; onPreview?: () => void }) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const update = useUpdateFile();
   const remove = useDeleteFile();
@@ -22,6 +22,7 @@ export function FileActions({ file }: { file: FileItem }) {
   }
 
   const actions: MenuAction[] = [
+    ...(onPreview ? [{ label: "Pré-visualizar", onSelect: onPreview }] : []),
     { label: "Descarregar", href: `/api/files/${encodeURIComponent(file.id)}/download` },
     { label: "Renomear", onSelect: () => setDialog("rename") },
     { label: "Mover…", onSelect: () => setDialog("move") },

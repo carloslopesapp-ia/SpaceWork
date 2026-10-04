@@ -1,8 +1,10 @@
 import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { errorMessage } from "../api";
 import { useLogout, useMe } from "../auth";
+import { UploadsProvider } from "../uploads-context";
 import { Button } from "./Button";
 import { Message } from "./Message";
+import { UploadPanel } from "./UploadPanel";
 import { UsageBar } from "./UsageBar";
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -61,7 +63,10 @@ export default function AppLayout() {
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-6 md:p-8">
-        <Outlet />
+        <UploadsProvider>
+          <Outlet />
+          <UploadPanel />
+        </UploadsProvider>
       </main>
     </div>
   );

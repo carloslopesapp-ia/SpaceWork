@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { FolderContents } from "../../shared/types";
+import { CONFIG_KEY } from "../space";
+import { stubXhr } from "../test/fake-xhr";
 import { apiError, json, ME, mockApi, noContent, SESSION } from "../test/mock-api";
 import { renderApp } from "../test/render";
 
@@ -38,7 +40,9 @@ describe("FolderPage: listagem", () => {
     expect(await screen.findByRole("heading", { name: "Fotos" })).toBeInTheDocument();
     const breadcrumb = within(screen.getByRole("navigation", { name: "Caminho" }));
     expect(breadcrumb.getByRole("link", { name: "Meu espaço" })).toHaveAttribute("href", "/");
-    expect(screen.getByText("Esta pasta está vazia.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Esta pasta está vazia. Arraste ficheiros para aqui ou use «Carregar ficheiros»."),
+    ).toBeInTheDocument();
     expect(server.callsTo("GET /api/folders/:id/contents")[0].params.id).toBe("f1");
   });
 
@@ -200,5 +204,119 @@ describe("FolderPage: ações das linhas", () => {
     await user.click(screen.getByRole("button", { name: "Excluir" }));
     await waitFor(() => expect(screen.queryByText("relatório.pdf")).not.toBeInTheDocument());
     expect(await screen.findByText("0 B de 1 GB")).toBeInTheDocument();
+  });
+});
+
+describe("FolderPage: envio e pré-visualização", () => {
+  const NEW_FILE = { id: "n1", name: "nota.txt", folderId: "f1", size: 10, mime: "text/plain", createdAt: CREATED };
+
+  function serve(overrides: Parameters<typeof mockApi>[0] = {}) {
+    let uploaded = false;
+    const server = mockApi({
+      ...SESSION,
+      "GET /api/folders/:id/contents": () => json(uploaded ? { ...FOTOS, files: [NEW_FILE] } : FOTOS),
+      ...overrides,
+    });
+    return { server, markUploaded: () => (uploaded = true) };
+  }
+
+  it("«Carregar ficheiros» envia para a pasta atual, mostra o progresso e a lista atualiza-se no fim", async () => {
+    const Xhr = stubXhr();
+    const { markUploaded } = serve();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await screen.findByRole("heading", { name: "Fotos" });
+
+    await user.upload(screen.getByLabelText("Escolher ficheiros"), new File(["0123456789"], "nota.txt", { type: "text/plain" }));
+    expect(Xhr.instances[0].url).toBe("/api/files?name=nota.txt&folder=f1");
+    act(() => Xhr.instances[0].progress(5, 10));
+    expect(await screen.findByRole("progressbar", { name: "Envio de nota.txt" })).toHaveAttribute("aria-valuenow", "50");
+
+    markUploaded();
+    act(() => Xhr.instances[0].respond(201, { file: NEW_FILE }));
+    expect(await screen.findByText("Concluído")).toBeInTheDocument();
+    expect(await screen.findByText("nota.txt", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("arrastar e largar ficheiros envia-os para a pasta atual", async () => {
+    const Xhr = stubXhr();
+    serve();
+    renderApp("/pasta/f1");
+    const heading = await screen.findByRole("heading", { name: "Fotos" });
+    const dropped = new File(["x"], "solta.png");
+    const dataTransfer = {
+      types: ["Files"],
+      items: [{ kind: "file", getAsFile: () => dropped, webkitGetAsEntry: () => ({ isDirectory: false }) }],
+    };
+
+    fireEvent.dragEnter(heading, { dataTransfer });
+    fireEvent.drop(heading, { dataTransfer });
+
+    expect(Xhr.instances[0].url).toBe("/api/files?name=solta.png&folder=f1");
+  });
+
+  it("arrastar uma pasta avisa que as pastas não se enviam", async () => {
+    const Xhr = stubXhr();
+    serve();
+    renderApp("/pasta/f1");
+    const heading = await screen.findByRole("heading", { name: "Fotos" });
+    const dataTransfer = {
+      types: ["Files"],
+      items: [{ kind: "file", getAsFile: () => new File([""], "Pasta"), webkitGetAsEntry: () => ({ isDirectory: true }) }],
+    };
+
+    fireEvent.drop(heading, { dataTransfer });
+
+    expect(screen.getByText("As pastas não se enviam: arraste os ficheiros.")).toBeInTheDocument();
+    expect(Xhr.instances).toHaveLength(0);
+  });
+
+  it("um ficheiro acima do limite do servidor nem é enviado", async () => {
+    const Xhr = stubXhr();
+    serve({ "GET /api/config": () => json({ maxUploadBytes: 5 }) });
+    const user = userEvent.setup();
+    const { client } = renderApp("/pasta/f1");
+    await screen.findByRole("heading", { name: "Fotos" });
+    await waitFor(() => expect(client.getQueryData(CONFIG_KEY)).toEqual({ maxUploadBytes: 5 }));
+
+    await user.upload(screen.getByLabelText("Escolher ficheiros"), new File(["0123456789"], "grande.bin"));
+
+    expect(await screen.findByText("O ficheiro excede o limite de 5 B.")).toBeInTheDocument();
+    expect(Xhr.instances).toHaveLength(0);
+  });
+
+  it("clicar no nome de uma imagem abre a pré-visualização; um ficheiro sem pré-visualização não é clicável", async () => {
+    serve({
+      "GET /api/folders/:id/contents": () =>
+        json({
+          ...FOTOS,
+          files: [
+            { ...NEW_FILE, id: "i1", name: "foto.png" },
+            { ...NEW_FILE, id: "t1", name: "notas.txt" },
+          ],
+        }),
+    });
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "foto.png" }));
+    expect(screen.getByRole("dialog", { name: "foto.png" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "foto.png" })).toHaveAttribute("src", "/api/files/i1/preview");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: "notas.txt" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Ações para o ficheiro notas.txt" }));
+    expect(screen.queryByRole("menuitem", { name: "Pré-visualizar" })).not.toBeInTheDocument();
+  });
+
+  it("«Pré-visualizar» também está no menu das imagens e dos PDF", async () => {
+    serve({
+      "GET /api/folders/:id/contents": () => json({ ...FOTOS, files: [{ ...NEW_FILE, id: "p1", name: "relatório.pdf" }] }),
+    });
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Ações para o ficheiro relatório.pdf" }));
+    await user.click(screen.getByRole("menuitem", { name: "Pré-visualizar" }));
+    expect(screen.getByTitle("Pré-visualização de relatório.pdf")).toHaveAttribute("src", "/api/files/p1/preview");
   });
 });

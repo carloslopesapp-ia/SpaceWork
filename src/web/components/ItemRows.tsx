@@ -1,10 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { formatBytes, formatDate } from "../../shared/format";
+import { previewContentType } from "../../shared/preview";
 import type { FileItem, FolderItem } from "../../shared/types";
 import { FileActions } from "./FileActions";
 import { FolderActions } from "./FolderActions";
 import { FileIcon, FolderIcon } from "./icons";
+import { PreviewDialog } from "./PreviewDialog";
 
 interface ItemRowProps {
   icon: ReactNode;
@@ -44,17 +46,31 @@ export function FolderRow({ folder }: { folder: FolderItem }) {
 }
 
 export function FileRow({ file }: { file: FileItem }) {
+  const [previewing, setPreviewing] = useState(false);
+  const canPreview = previewContentType(file.name) !== null;
+  const openPreview = () => setPreviewing(true);
   return (
     <ItemRow
       icon={<FileIcon />}
       name={
-        <span title={file.name} className="block truncate">
-          {file.name}
-        </span>
+        canPreview ? (
+          <button type="button" title={file.name} onClick={openPreview} className="block w-full truncate text-left hover:underline">
+            {file.name}
+          </button>
+        ) : (
+          <span title={file.name} className="block truncate">
+            {file.name}
+          </span>
+        )
       }
       size={formatBytes(file.size)}
       date={formatDate(file.createdAt)}
-      actions={<FileActions file={file} />}
+      actions={
+        <>
+          <FileActions file={file} onPreview={canPreview ? openPreview : undefined} />
+          {previewing && <PreviewDialog file={file} onClose={() => setPreviewing(false)} />}
+        </>
+      }
     />
   );
 }

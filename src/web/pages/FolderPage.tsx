@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { Link, useParams } from "react-router";
 import { ApiRequestError, errorMessage } from "../api";
 import { Breadcrumb } from "../components/Breadcrumb";
@@ -6,15 +6,25 @@ import { Button } from "../components/Button";
 import { FileRow, FolderRow } from "../components/ItemRows";
 import { Message } from "../components/Message";
 import { NameDialog } from "../components/NameDialog";
+import { filesFromDrop } from "../dropped-files";
 import { useContents, useCreateFolder } from "../space";
 import { ROOT_LABEL } from "../tree";
+import { useUploads } from "../uploads-context";
+
+const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 
 /** "Meu espaço": o conteúdo de uma pasta (a raiz em `/`, as outras em `/pasta/:folderId`). */
 export default function FolderPage() {
   const folderId = useParams().folderId ?? null;
   const contents = useContents(folderId);
   const createFolder = useCreateFolder();
+  const uploads = useUploads();
   const [creating, setCreating] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  // `dragenter`/`dragleave` disparam também ao passar por cima dos filhos: conta-se a profundidade.
+  const dragDepth = useRef(0);
 
   if (contents.isPending) return <p className="text-slate-500">A carregar…</p>;
   if (contents.isError) {
@@ -42,18 +52,68 @@ export default function FolderPage() {
     createFolder.reset();
   }
 
+  function addFiles(chosen: File[]) {
+    if (chosen.length > 0) uploads.add(chosen, folderId);
+  }
+
+  function onDrop(event: DragEvent) {
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const dropped = filesFromDrop(event.dataTransfer);
+    setNotice(dropped.skippedFolders > 0 ? "As pastas não se enviam: arraste os ficheiros." : null);
+    addFiles(dropped.files);
+  }
+
   return (
-    <div>
+    <div
+      className={`min-h-[60vh] rounded-xl ${dragging ? "bg-indigo-50/60 outline-2 outline-dashed outline-indigo-400" : ""}`}
+      onDragEnter={(event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (hasFiles(event)) event.preventDefault();
+      }}
+      onDragLeave={() => {
+        if (dragDepth.current > 0 && --dragDepth.current === 0) setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
       <Breadcrumb items={breadcrumb} />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight break-words">{folder?.name ?? ROOT_LABEL}</h1>
-        <Button variant="secondary" onClick={() => setCreating(true)}>
-          Nova pasta
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setCreating(true)}>
+            Nova pasta
+          </Button>
+          <Button onClick={() => fileInput.current?.click()}>Carregar ficheiros</Button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            aria-label="Escolher ficheiros"
+            onChange={(event) => {
+              addFiles([...(event.target.files ?? [])]);
+              event.target.value = ""; // para poder escolher o mesmo ficheiro outra vez
+            }}
+          />
+        </div>
       </div>
 
+      {notice && (
+        <div className="mt-4">
+          <Message kind="error">{notice}</Message>
+        </div>
+      )}
+
       {folders.length + files.length === 0 ? (
-        <p className="mt-10 text-center text-slate-500">Esta pasta está vazia.</p>
+        <p className="mt-10 text-center text-slate-500">
+          Esta pasta está vazia. Arraste ficheiros para aqui ou use «Carregar ficheiros».
+        </p>
       ) : (
         <ul className="mt-6 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
           {folders.map((item) => (

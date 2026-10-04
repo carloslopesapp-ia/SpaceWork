@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FileItem } from "../../shared/types";
 import { apiError, json, mockApi, noContent } from "../test/mock-api";
 import { queryWrapper, testQueryClient } from "../test/render";
@@ -85,5 +85,28 @@ describe("FileActions", () => {
     await screen.findByRole("button", { name: MENU });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(server.callsTo("DELETE /api/files/:id")[0].params.id).toBe("a1");
+  });
+});
+
+describe("FileActions: pré-visualizar", () => {
+  it("«Pré-visualizar» só aparece quando a linha o pede, e é a primeira ação", async () => {
+    const onPreview = vi.fn();
+    const Wrapper = queryWrapper(testQueryClient());
+    render(
+      <Wrapper>
+        <FileActions file={FILE} onPreview={onPreview} />
+      </Wrapper>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: MENU }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Pré-visualizar",
+      "Descarregar",
+      "Renomear",
+      "Mover…",
+      "Excluir",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "Pré-visualizar" }));
+    expect(onPreview).toHaveBeenCalledTimes(1);
   });
 });

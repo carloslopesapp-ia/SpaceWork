@@ -29,7 +29,10 @@ export const ME: PublicUser = {
 };
 
 /** A rota de sessão que quase todos os testes de páginas precisam. */
-export const SESSION = { "GET /api/auth/me": () => json({ user: ME }) };
+export const SESSION = {
+  "GET /api/auth/me": () => json({ user: ME }),
+  "GET /api/config": () => json({ maxUploadBytes: 104_857_600 }),
+};
 
 /**
  * Substitui o `fetch` global por um servidor falso: `routes` mapeia "MÉTODO /caminho/:param" para uma função
