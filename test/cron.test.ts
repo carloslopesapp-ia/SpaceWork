@@ -146,7 +146,7 @@ describe("runMaintenance: falhas e limites", () => {
     await expect(scheduledMaintenance(broken, NOW)).rejects.toThrow(/Manutenção com erros: lixeira: D1 em baixo/);
   });
 
-  it("no pior caso gasta 21 subpedidos, bem abaixo dos 50 do plano gratuito", async () => {
+  it("sem contas em remoção gasta 22 subpedidos no pior caso das outras etapas, bem abaixo dos 50 do plano gratuito", async () => {
     const owners = await Promise.all(["a", "b", "c", "d"].map((name) => insertUser(`${name}@example.com`)));
     const perOwner = (TRASH_BLOCKS * PURGE_BATCH) / owners.length + 10; // mais do que cabe numa execução
     for (const [index, owner] of owners.entries()) {
@@ -164,8 +164,8 @@ describe("runMaintenance: falhas e limites", () => {
     const report = await runMaintenance(counted, NOW);
 
     expect(report).toMatchObject({ trashPurged: TRASH_BLOCKS * PURGE_BATCH, pendingPurged: PENDING_BLOCKS * PURGE_BATCH, errors: [] });
-    // lixeira: 1 + 6 × 2; pendentes: 1 + 3 × 2; limpeza: 1
-    expect(subrequests()).toBe(1 + TRASH_BLOCKS * 2 + (1 + PENDING_BLOCKS * 2) + 1);
+    // lixeira: 1 + 6 × 2; pendentes: 1 + 3 × 2; contas em remoção: 1 (só a consulta); limpeza: 1
+    expect(subrequests()).toBe(1 + TRASH_BLOCKS * 2 + (1 + PENDING_BLOCKS * 2) + 1 + 1);
     expect(subrequests()).toBeLessThanOrEqual(50);
   });
 });

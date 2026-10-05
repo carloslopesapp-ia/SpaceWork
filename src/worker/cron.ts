@@ -1,4 +1,5 @@
 import { getConfig } from "./config";
+import { removeDeletingAccounts } from "./lib/account-removal";
 import { PURGE_BATCH, purgeExpiredTrash, purgeStalePending } from "./lib/purge";
 
 const DAY_MS = 86_400_000;
@@ -15,8 +16,10 @@ export const SHARE_KEEP_MS = 30 * DAY_MS;
  * A conta de cada passo, no pior caso:
  *   - lixeira:   1 consulta + `TRASH_BLOCKS` × 2 (uma `batch` e um `delete` do R2 por bloco) = 13;
  *   - pendentes: 1 consulta + `PENDING_BLOCKS` × 2 = 7;
+ *   - contas em remoção: 1 consulta + `ACCOUNTS_PER_RUN` × (`SWEEP_PAGES` × 2 + 1) = 11 (ver `removeDeletingAccounts`);
  *   - limpeza:   1 `batch` com as 4 instruções = 1.
- * O que não couber fica para a hora seguinte (cada passo é idempotente e retoma onde ficou).
+ * Somam 32 no pior caso (22 quando não há contas em remoção). O que não couber fica para a hora seguinte (cada passo é idempotente e
+ * retoma onde ficou).
  */
 export const TRASH_BLOCKS = 6;
 export const PENDING_BLOCKS = 3;
@@ -37,6 +40,8 @@ export const CLEANUP_SQL = {
 export interface MaintenanceReport {
   trashPurged: number;
   pendingPurged: number;
+  accountsRemoved: number;
+  accountObjectsDeleted: number;
   sessionsDeleted: number;
   loginFailuresDeleted: number;
   sharesDeleted: number;
@@ -65,6 +70,8 @@ export async function runMaintenance(env: Env, now: number = Date.now()): Promis
   const report: MaintenanceReport = {
     trashPurged: 0,
     pendingPurged: 0,
+    accountsRemoved: 0,
+    accountObjectsDeleted: 0,
     sessionsDeleted: 0,
     loginFailuresDeleted: 0,
     sharesDeleted: 0,
@@ -89,6 +96,12 @@ export async function runMaintenance(env: Env, now: number = Date.now()): Promis
   await step("envios pendentes", async () => {
     const ids = await selectIds(env.DB, STALE_PENDING_SQL, now - PENDING_MAX_AGE_MS, PENDING_BLOCKS * PURGE_BATCH);
     report.pendingPurged = await purgeInBlocks(ids, (block) => purgeStalePending(env, block));
+  });
+
+  await step("contas em remoção", async () => {
+    const removal = await removeDeletingAccounts(env);
+    report.accountsRemoved = removal.accountsRemoved;
+    report.accountObjectsDeleted = removal.objectsDeleted;
   });
 
   await step("limpeza", async () => {
