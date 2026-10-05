@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { FolderItem } from "../../shared/types";
 import { errorMessage } from "../api";
 import { useDeleteFolder, useUpdateFolder } from "../space";
@@ -6,25 +5,20 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { MoveDialog } from "./MoveDialog";
 import { NameDialog } from "./NameDialog";
 import { RowMenu, type MenuAction } from "./RowMenu";
+import { useDialog } from "./useDialog";
 
 type Dialog = "rename" | "move" | "delete";
 
 /** O menu «⋮» de uma pasta e os diálogos das suas ações (renomear, mover e excluir). */
 export function FolderActions({ folder }: { folder: FolderItem }) {
-  const [dialog, setDialog] = useState<Dialog | null>(null);
   const update = useUpdateFolder();
   const remove = useDeleteFolder();
-
-  function close() {
-    setDialog(null);
-    update.reset();
-    remove.reset();
-  }
+  const { dialog, open, close } = useDialog<Dialog>(update, remove);
 
   const actions: MenuAction[] = [
-    { label: "Renomear", onSelect: () => setDialog("rename") },
-    { label: "Mover…", onSelect: () => setDialog("move") },
-    { label: "Excluir", danger: true, onSelect: () => setDialog("delete") },
+    { label: "Renomear", onSelect: () => open("rename") },
+    { label: "Mover…", onSelect: () => open("move") },
+    { label: "Excluir", danger: true, onSelect: () => open("delete") },
   ];
   const updateError = update.error ? errorMessage(update.error) : null;
 

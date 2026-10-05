@@ -33,7 +33,13 @@ describe("FileActions", () => {
   it("o menu tem Descarregar (uma ligação para o servidor), Renomear, Mover e Excluir", async () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: MENU }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Descarregar", "Renomear", "Mover…", "Excluir"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Descarregar",
+      "Partilhar…",
+      "Renomear",
+      "Mover…",
+      "Excluir",
+    ]);
     expect(screen.getByRole("menuitem", { name: "Descarregar" })).toHaveAttribute("href", "/api/files/a1/download");
   });
 
@@ -76,6 +82,18 @@ describe("FileActions", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("pode ser um envio ainda em curso");
   });
 
+  it("partilhar: abre o diálogo da partilha deste ficheiro e fecha-o com «Fechar»", async () => {
+    const server = mockApi({ "GET /api/files/:id/shares": () => json({ shares: [] }) });
+    const user = setup();
+    await choose(user, "Partilhar…");
+    expect(screen.getByRole("dialog", { name: "Partilhar «relatório.pdf»" })).toBeInTheDocument();
+    expect(await screen.findByText("Ainda não há links ativos.")).toBeInTheDocument();
+    expect(server.callsTo("GET /api/files/:id/shares")[0].params.id).toBe("a1");
+    await user.click(screen.getByRole("button", { name: "Fechar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: MENU })).toHaveFocus();
+  });
+
   it("excluir: pede confirmação, avisa que vai para a lixeira e apaga", async () => {
     const server = mockApi({ "DELETE /api/files/:id": () => noContent() });
     const user = setup();
@@ -102,6 +120,7 @@ describe("FileActions: pré-visualizar", () => {
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "Pré-visualizar",
       "Descarregar",
+      "Partilhar…",
       "Renomear",
       "Mover…",
       "Excluir",
