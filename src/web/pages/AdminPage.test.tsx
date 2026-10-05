@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { AdminUser } from "../../shared/types";
@@ -85,5 +85,74 @@ describe("AdminPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Atualizar" }));
     await screen.findByRole("button", { name: "Atualizar" });
     expect(server.callsTo("GET /api/admin/users").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("AdminPage: ações", () => {
+  it("suspender uma conta atualiza o estado na tabela e o menu passa a oferecer «Reativar»", async () => {
+    let suspended = false;
+    const server = serve([ADMIN, ANA], {
+      "GET /api/admin/users": () => json({ users: [ADMIN, suspended ? { ...ANA, status: "suspended" } : ANA] }),
+      "PATCH /api/admin/users/:id": () => {
+        suspended = true;
+        return json({ user: { ...ANA, status: "suspended" } });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/admin");
+    await user.click(await screen.findByRole("button", { name: "Ações para a conta ana@example.com" }));
+    await user.click(screen.getByRole("menuitem", { name: "Suspender…" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Suspender" }));
+
+    const row = (await screen.findByText("Suspensa")).closest("tr")!;
+    expect(within(row).getByText("ana@example.com")).toBeInTheDocument();
+    expect(server.callsTo("PATCH /api/admin/users/:id")[0].body).toEqual({ status: "suspended" });
+    await user.click(within(row).getByRole("button", { name: "Ações para a conta ana@example.com" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toContain("Reativar");
+  });
+
+  it("apagar uma conta passa-a a «A remover», sem menu de ações", async () => {
+    let deleting = false;
+    serve([ADMIN, ANA], {
+      "GET /api/admin/users": () => json({ users: [ADMIN, deleting ? { ...ANA, status: "deleting" } : ANA] }),
+      "DELETE /api/admin/users/:id": () => {
+        deleting = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/admin");
+    await user.click(await screen.findByRole("button", { name: "Ações para a conta ana@example.com" }));
+    await user.click(screen.getByRole("menuitem", { name: "Apagar conta…" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Apagar conta" }));
+
+    const row = (await screen.findByText("A remover")).closest("tr")!;
+    expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("a conta de administrador só tem «Alterar quota…», e mudar a própria quota atualiza a barra lateral", async () => {
+    let quota = 10_737_418_240;
+    const server = serve([], {
+      "GET /api/auth/me": () => json({ user: { ...ADMIN_ME, quotaBytes: quota } }),
+      "GET /api/admin/users": () => json({ users: [{ ...ADMIN, quotaBytes: quota }] }),
+      "PATCH /api/admin/users/:id": ({ body }) => {
+        quota = (body as { quotaBytes: number }).quotaBytes;
+        return json({ user: { ...ADMIN, quotaBytes: quota } });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/admin");
+    await user.click(await screen.findByRole("button", { name: "Ações para a conta admin@example.com" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Alterar quota…"]);
+    await user.click(screen.getByRole("menuitem", { name: "Alterar quota…" }));
+    await user.clear(screen.getByLabelText("Quota (GB)"));
+    await user.type(screen.getByLabelText("Quota (GB)"), "20");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(server.callsTo("PATCH /api/admin/users/:id")[0].body).toEqual({ quotaBytes: 21_474_836_480 });
+    // a barra lateral (a sessão foi refeita) e a tabela mostram a quota nova
+    await waitFor(() => expect(screen.getAllByText("0 B de 20 GB")).toHaveLength(2));
   });
 });

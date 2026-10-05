@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AdminUser } from "../shared/types";
+import { isValidQuota, MAX_QUOTA_BYTES } from "../shared/validation";
 import { apiFetch } from "./api";
 import { ME_KEY } from "./auth";
 
@@ -41,3 +42,22 @@ export function useUpdateUser() {
 export function useDeleteUser() {
   return useAdminMutation((id: string) => apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" }));
 }
+
+const GB = 1024 ** 3;
+/** A quota máxima em GB (1 PiB), para a mensagem de erro. */
+const MAX_QUOTA_GB = MAX_QUOTA_BYTES / GB;
+
+/** A quota que o administrador escreveu, em GB (com vírgula ou ponto), em bytes; `null` se não for um número entre 0 e o máximo. */
+export function parseQuotaGb(text: string): number | null {
+  const normalized = text.trim().replace(",", ".");
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const bytes = Math.round(Number(normalized) * GB);
+  return isValidQuota(bytes) ? bytes : null;
+}
+
+/** A quota em GB para o campo de texto, com vírgula e no máximo duas casas decimais (1073741824 -> "1", 1610612736 -> "1,5"). */
+export function quotaToGbText(bytes: number): string {
+  return String(Math.round((bytes / GB) * 100) / 100).replace(".", ",");
+}
+
+export const QUOTA_HINT = `Indique a quota em GB, um número de 0 a ${MAX_QUOTA_GB} (por exemplo 1,5).`;

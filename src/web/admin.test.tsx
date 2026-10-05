@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { AdminUser } from "../shared/types";
-import { useAdminUsers, useDeleteUser, useUpdateUser } from "./admin";
+import { MAX_QUOTA_BYTES } from "../shared/validation";
+import { parseQuotaGb, quotaToGbText, useAdminUsers, useDeleteUser, useUpdateUser } from "./admin";
 import { useMe } from "./auth";
 import { apiError, json, ME, mockApi, noContent } from "./test/mock-api";
 import { queryWrapper, testQueryClient } from "./test/render";
@@ -67,5 +68,29 @@ describe("mutações do painel", () => {
     await act(() => hook.result.current.remove.mutateAsync("u 1").catch(() => undefined));
     await waitFor(() => expect(hook.result.current.remove.error?.message).toBe("Uma conta de administrador não se pode suspender nem apagar."));
     await waitFor(() => expect(server.callsTo("GET /api/admin/users")).toHaveLength(3));
+  });
+});
+
+describe("quota em GB", () => {
+  it("lê o campo com vírgula ou ponto e devolve bytes", () => {
+    expect(parseQuotaGb("1")).toBe(1_073_741_824);
+    expect(parseQuotaGb(" 2,5 ")).toBe(2_684_354_560);
+    expect(parseQuotaGb("0.25")).toBe(268_435_456);
+    expect(parseQuotaGb("0")).toBe(0);
+    expect(parseQuotaGb("1048576")).toBe(MAX_QUOTA_BYTES); // 1 PiB
+  });
+
+  it("recusa o que não é um número, é negativo ou passa o máximo", () => {
+    for (const text of ["", " ", "abc", "-1", "1,2,3", "1e3", "1048577", "1 GB", "Infinity", "0x10"]) {
+      expect(parseQuotaGb(text), JSON.stringify(text)).toBeNull();
+    }
+  });
+
+  it("mostra a quota atual com vírgula e até duas casas", () => {
+    expect(quotaToGbText(1_073_741_824)).toBe("1");
+    expect(quotaToGbText(1_610_612_736)).toBe("1,5");
+    expect(quotaToGbText(10_737_418_240)).toBe("10");
+    expect(quotaToGbText(0)).toBe("0");
+    expect(quotaToGbText(1_000_000_000)).toBe("0,93");
   });
 });

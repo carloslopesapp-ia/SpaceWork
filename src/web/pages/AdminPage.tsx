@@ -8,6 +8,7 @@ import { useMe } from "../auth";
 import { Button } from "../components/Button";
 import { Message } from "../components/Message";
 import { UsageBar } from "../components/UsageBar";
+import { UserActions } from "../components/UserActions";
 
 const STATUS_LABEL: Record<UserStatus, string> = { active: "Ativa", suspended: "Suspensa", deleting: "A remover" };
 const STATUS_STYLE: Record<UserStatus, string> = {
@@ -105,7 +106,12 @@ export default function AdminPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {users.data.map((user) => (
-              <UserRow key={user.id} user={user} isSelf={user.id === me.data?.id} />
+              <UserRow
+                key={user.id}
+                user={user}
+                isSelf={user.id === me.data?.id}
+                actions={user.status === "deleting" ? undefined : <UserActions user={user} />}
+              />
             ))}
           </tbody>
         </table>
