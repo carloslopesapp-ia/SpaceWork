@@ -41,4 +41,10 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("A pasta não está vazia.");
     expect(screen.getByRole("button", { name: "A excluir…" })).toBeDisabled();
   });
+
+  it("o texto do botão enquanto a ação decorre pode ser outro", () => {
+    setup({ pending: true, pendingLabel: "A eliminar…" });
+    expect(screen.getByRole("button", { name: "A eliminar…" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "A excluir…" })).not.toBeInTheDocument();
+  });
 });

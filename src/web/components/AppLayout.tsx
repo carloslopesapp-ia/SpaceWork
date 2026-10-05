@@ -62,6 +62,9 @@ export default function AppLayout() {
           <NavLink to="/" end className={({ isActive }) => navClass({ isActive: isActive || pathname.startsWith("/pasta/") })}>
             Meu espaço
           </NavLink>
+          <NavLink to="/lixeira" className={navClass}>
+            Lixeira
+          </NavLink>
           <NavLink to="/conta" className={navClass}>
             Conta
           </NavLink>

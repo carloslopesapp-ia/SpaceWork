@@ -6,6 +6,8 @@ interface ConfirmDialogProps {
   title: string;
   message: string;
   confirmLabel: string;
+  /** O texto do botão enquanto a ação decorre. */
+  pendingLabel?: string;
   pending: boolean;
   error: string | null;
   onConfirm: () => void;
@@ -13,7 +15,16 @@ interface ConfirmDialogProps {
 }
 
 /** Confirmação de uma ação destrutiva. O foco começa em "Cancelar". */
-export function ConfirmDialog({ title, message, confirmLabel, pending, error, onConfirm, onClose }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  pendingLabel = "A excluir…",
+  pending,
+  error,
+  onConfirm,
+  onClose,
+}: ConfirmDialogProps) {
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-4">
@@ -24,7 +35,7 @@ export function ConfirmDialog({ title, message, confirmLabel, pending, error, on
             Cancelar
           </Button>
           <Button variant="danger" disabled={pending} onClick={onConfirm}>
-            {pending ? "A excluir…" : confirmLabel}
+            {pending ? pendingLabel : confirmLabel}
           </Button>
         </div>
       </div>
