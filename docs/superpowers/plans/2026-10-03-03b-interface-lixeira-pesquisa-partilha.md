@@ -19,6 +19,8 @@ Valores da especificação e dos planos anteriores; todas as tarefas os cumprem 
 - O link completo de uma partilha só existe na resposta da criação (`token` de `POST /api/files/:id/shares`) e só vive no estado do diálogo aberto: nunca se escreve em armazenamento do browser nem no endereço de uma página da aplicação.
 - A página pública `/s/:token` não pede a sessão e não carrega recursos de outras origens; o descarregamento é a ligação `/api/public/shares/:token/download` (a API responde com `Content-Disposition: attachment`).
 - Rotas da interface: `/pesquisa?q=`, `/lixeira` e `/s/:token` (as duas primeiras dentro do `AppLayout`).
+- Um diálogo que lança um pedido que não se desfaz nem se cancela (eliminar de vez, esvaziar a lixeira, excluir, terminar a sessão, criar um link) ignora o Esc e o clique no fundo, e tem «Cancelar» ou «Fechar» desativado, enquanto o pedido decorre: fechá-lo faria a página esquecer uma ação que continua a correr. O foco nunca fica fora de um diálogo aberto (o `Modal` devolve-lho se o elemento focado desaparecer).
+- O fim de sessão (terminar a sessão ou um 401) é `forgetAccount`: cancela o pedido da sessão em curso, tira as outras consultas, esvazia a cache das mutações (guarda senhas e tokens) e põe a sessão a `null`. O token de uma partilha também não fica na cache das mutações depois de o diálogo se fechar (`gcTime: 0`).
 - Os testes da interface correm em jsdom (`npx vitest run -c vitest.web.config.ts`) e mostram só o resumo do Vitest: qualquer outra saída (avisos de `act`, `console.error`) é um defeito do teste a corrigir. Um teste que espera por um temporizador usa relógios reais com um intervalo curto, nunca `vi.useFakeTimers` (o `waitFor` do Testing Library não avança temporizadores falsos no Vitest).
 - IDs `crypto.randomUUID()`; datas em milissegundos Unix. Vitest `^4.1`.
 - **Nenhum `git push` sem confirmação explícita do utilizador.**
@@ -39,12 +41,15 @@ src/web/space.ts                            + TRASH_KEY, SEARCH_KEY; useRefreshS
 src/web/search.ts                           describeSearch, useSearch
 src/web/trash.ts                            useTrash, useRestoreFile, usePurgeFile, useEmptyTrash
 src/web/shares.ts                           useShares, useCreateShare, useRevokeShare, usePublicShare, shareUrl, shareDownloadUrl
-src/web/auth.ts                             useLogout sem clear()
+src/web/auth.ts                             forgetAccount (fim de sessão sem clear()); useLogout usa-o
+src/web/query-client.ts                     o tratamento do 401 usa forgetAccount
 src/web/uploads-context.tsx                 três contextos (ações, ocupado, lista) e um refresh por intervalo
 src/web/components/Location.tsx             «Em Meu espaço / Pasta»
 src/web/components/SearchBox.tsx            caixa de pesquisa da barra lateral
 src/web/components/ShareDialog.tsx          o diálogo «Partilhar…»
 src/web/components/useDialog.ts             estado comum dos menus de ações
+src/web/components/Modal.tsx                devolve o foco ao diálogo se o elemento focado desaparece
+src/web/components/ConfirmDialog.tsx        pendingLabel; não se fecha enquanto a ação decorre
 src/web/components/AppLayout.tsx            pesquisa, «Lixeira» e «Sair» com confirmação; o provider dos envios envolve a barra lateral
 src/web/pages/SearchPage.tsx                /pesquisa
 src/web/pages/TrashPage.tsx                 /lixeira
@@ -111,7 +116,10 @@ por:
 ```ts
 export const NAME_MAX_LENGTH = 255;
 
-/** Comprimento (em caracteres, depois de tirar espaços e acentos) que uma pesquisa por nome pode ter: a API e a caixa de pesquisa usam os mesmos limites. */
+/**
+ * Comprimento de uma pesquisa por nome. O mínimo conta caracteres (pontos de código) depois de tirar espaços e acentos; o máximo
+ * conta unidades UTF-16 do texto normalizado (NFC, sem espaços nas pontas). A API e a caixa de pesquisa usam os mesmos limites.
+ */
 export const SEARCH_MIN_LENGTH = 2;
 export const SEARCH_MAX_LENGTH = 100;
 ```
@@ -616,6 +624,18 @@ describe("useCreateShare", () => {
     await act(() => result.current.mutateAsync(null).catch(() => undefined));
     await waitFor(() => expect(result.current.error).toMatchObject({ code: "too_many_shares" }));
   });
+
+  it("o token não fica na cache das mutações quando deixa de haver quem a observe", async () => {
+    mockApi({ "POST /api/files/:id/shares": () => json({ share: SHARE, token: "tok" }, 201) });
+    const client = testQueryClient();
+    const create = renderHook(() => useCreateShare("a"), { wrapper: queryWrapper(client) });
+    await act(() => create.result.current.mutateAsync(null));
+    expect(client.getMutationCache().getAll()).toHaveLength(1);
+
+    create.unmount();
+
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
+  });
 });
 
 describe("useRevokeShare", () => {
@@ -663,6 +683,8 @@ Run: `npx vitest run -c vitest.web.config.ts src/web/trash.test.tsx src/web/sear
 Expected: FAIL (Test Files  3 failed (3); Tests  no tests).
 
 - [ ] **Step 2: Implementar `space.ts`, `search.ts`, `trash.ts` e `shares.ts`**
+
+`useCreateShare` leva `gcTime: 0`: o token do link só pode viver enquanto o diálogo está aberto, e sem isso a cache das mutações guardava-o cinco minutos depois de o diálogo se fechar (o teste «o token não fica na cache das mutações…» de `shares.test.tsx` verifica-o).
 
 Em `src/web/space.ts`, trocar:
 
@@ -843,6 +865,8 @@ export function useShares(fileId: string) {
 export function useCreateShare(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    // O token só vive enquanto o diálogo está aberto: sem `gcTime`, a cache das mutações guardava-o 5 minutos.
+    gcTime: 0,
     mutationFn: (expiresAt: number | null) =>
       apiFetch<{ share: ShareItem; token: string }>(`/api/files/${encodeURIComponent(fileId)}/shares`, {
         method: "POST",
@@ -881,12 +905,12 @@ export function shareDownloadUrl(token: string): string {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/trash.test.tsx src/web/search.test.tsx src/web/shares.test.tsx`
-Expected: `Test Files  3 passed (3)`, `Tests  21 passed (21)`.
+Expected: `Test Files  3 passed (3)`, `Tests  22 passed (22)`.
 
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  24 passed (24)`, `Tests  160 passed (160)`.
+Expected: `Test Files  24 passed (24)`, `Tests  161 passed (161)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -982,7 +1006,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  3 passed (3)`.
 
 - [ ] **Step 2: Página da pesquisa e caixa de pesquisa (testes primeiro)**
 
-A pesquisa é uma página própria (`/pesquisa?q=...`) e não uma lista dentro de «Meu espaço»: a caixa está na barra lateral de todas as páginas autenticadas e o endereço da pesquisa pode ser copiado e voltar-se a ele com o botão «Voltar». Pesquisa-se ao carregar em Enter (ou em «Pesquisar»), não a cada tecla: não enche o histórico nem gasta leituras da D1 por cada letra. Os resultados reutilizam as linhas de «Meu espaço», por isso todas as ações (renomear, mover, excluir, partilhar) funcionam neles, e depois de cada uma a pesquisa atualiza-se (Task 2).
+A pesquisa é uma página própria (`/pesquisa?q=...`) e não uma lista dentro de «Meu espaço»: a caixa está na barra lateral de todas as páginas autenticadas e o endereço da pesquisa pode ser copiado e voltar-se a ele com o botão «Voltar». Pesquisa-se ao carregar em Enter (ou em «Pesquisar»), não a cada tecla: não enche o histórico nem gasta leituras da D1 por cada letra. Os resultados reutilizam as linhas de «Meu espaço», por isso todas as ações (renomear, mover, excluir, partilhar) funcionam neles, e depois de cada uma a pesquisa atualiza-se (Task 2). Duas decisões de acessibilidade: o campo nunca é remontado (acompanha o texto pesquisado ajustando o estado durante a renderização, e não com uma `key`, que lhe tirava o foco a cada pesquisa), e o estado da pesquisa («A pesquisar…», «3 resultados», «Nenhum resultado…») é uma só linha `role="status"` sempre montada: o foco fica na caixa e os leitores de ecrã só anunciam o que muda dentro de uma região viva.
 
 Criar `src/web/pages/SearchPage.test.tsx`:
 
@@ -1032,7 +1056,8 @@ describe("pesquisa", () => {
     renderApp("/");
     await screen.findByRole("heading", { name: "Meu espaço" });
 
-    await user.type(box(), "  praia {Enter}");
+    const input = box();
+    await user.type(input, "  praia {Enter}");
 
     expect(await screen.findByRole("heading", { name: "Resultados para «praia»" })).toBeInTheDocument();
     expect(server.calls.find((call) => call.path === "/api/search")?.query.get("q")).toBe("praia");
@@ -1043,6 +1068,8 @@ describe("pesquisa", () => {
     expect(within(rows[1]).getByRole("link", { name: "Em Meu espaço" })).toHaveAttribute("href", "/");
     expect(within(rows[2]).getByRole("link", { name: "Em Meu espaço / Documentos / Contas" })).toHaveAttribute("href", "/pasta/c1");
     expect(box()).toHaveValue("praia");
+    expect(box()).toBe(input); // o campo não foi remontado...
+    expect(input).toHaveFocus(); // ...por isso o teclado continua nele
   });
 
   it("abrir /pesquisa?q=... diretamente pesquisa e mostra o texto na caixa", async () => {
@@ -1050,6 +1077,22 @@ describe("pesquisa", () => {
     renderApp("/pesquisa?q=praia");
     expect(await screen.findByText("1 resultado")).toBeInTheDocument();
     expect(box()).toHaveValue("praia");
+  });
+
+  it("pesquisar outra vez, a partir da página da pesquisa, mantém o campo e o foco", async () => {
+    serve();
+    const user = userEvent.setup();
+    renderApp("/pesquisa?q=praia");
+    await screen.findByText("3 resultados");
+    const input = box();
+
+    await user.clear(input);
+    await user.type(input, "casa{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "Resultados para «casa»" })).toBeInTheDocument();
+    expect(box()).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("casa");
   });
 
   it("um texto curto não pede nada à API e diz o que falta; um vazio pede para escrever", async () => {
@@ -1134,11 +1177,30 @@ describe("pesquisa", () => {
     await waitFor(() => expect(screen.queryByText("praia.png")).not.toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Praias do Sul" })).toBeInTheDocument();
   });
+
+  it("o estado da pesquisa é anunciado numa só região viva que fica montada de «A pesquisar…» até aos resultados", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    serve([], {
+      "GET /api/search": async () => {
+        await gate;
+        return json({ results: [FILE_IN_FOTOS] });
+      },
+    });
+    renderApp("/pesquisa?q=praia");
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("A pesquisar…"));
+
+    release();
+
+    await waitFor(() => expect(status).toHaveTextContent("1 resultado"));
+    expect(screen.getByRole("status")).toBe(status); // o mesmo elemento: os leitores de ecrã anunciam a mudança
+  });
 });
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/SearchPage.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  9 failed (9)).
+Expected: FAIL (Test Files  1 failed (1); Tests  11 failed (11)).
 
 Em `src/web/components/ItemRows.tsx`, substituir o bloco de `import` no topo do ficheiro (todas as linhas de `import`, até à linha em branco) por:
 
@@ -1254,9 +1316,24 @@ import { Button } from "./Button";
 
 export const SEARCH_PATH = "/pesquisa";
 
-function SearchForm({ initial }: { initial: string }) {
+/**
+ * A caixa de pesquisa da barra lateral: Enter (ou «Pesquisar») leva a `/pesquisa?q=...`. Na página da pesquisa mostra o texto
+ * pesquisado; quando o texto pesquisado muda (outra pesquisa, o botão «Voltar», sair da página da pesquisa) o campo acompanha-o.
+ * O campo nunca é remontado, por isso mantém o foco depois de pesquisar.
+ */
+export function SearchBox() {
+  const { pathname } = useLocation();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const [text, setText] = useState(initial);
+  const searched = pathname === SEARCH_PATH ? (params.get("q") ?? "") : "";
+  const [text, setText] = useState(searched);
+  // Acompanha o texto pesquisado ajustando o estado durante a renderização. Uma `key` no formulário fazia o mesmo, mas remontava o
+  // campo e tirava-lhe o foco a cada pesquisa.
+  const [followed, setFollowed] = useState(searched);
+  if (followed !== searched) {
+    setFollowed(searched);
+    setText(searched);
+  }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1281,17 +1358,6 @@ function SearchForm({ initial }: { initial: string }) {
     </form>
   );
 }
-
-/**
- * A caixa de pesquisa da barra lateral: Enter (ou «Pesquisar») leva a `/pesquisa?q=...`. Na página da pesquisa mostra o texto
- * pesquisado; ao ir para outra página limpa-se (a `key` recomeça o formulário sempre que o texto pesquisado muda).
- */
-export function SearchBox() {
-  const { pathname } = useLocation();
-  const [params] = useSearchParams();
-  const searched = pathname === SEARCH_PATH ? (params.get("q") ?? "") : "";
-  return <SearchForm key={searched} initial={searched} />;
-}
 ```
 
 Criar `src/web/pages/SearchPage.tsx`:
@@ -1313,43 +1379,38 @@ export default function SearchPage() {
   const raw = params.get("q") ?? "";
   const { term, problem } = describeSearch(raw);
   const search = useSearch(raw);
+  const results = problem === null ? search.data : undefined;
 
-  let body;
-  if (term === "") {
-    body = <p className="mt-6 text-slate-500">Escreva o que procura na caixa de pesquisa.</p>;
-  } else if (problem !== null) {
-    body = <p className="mt-6 text-slate-500">{problem}</p>;
-  } else if (search.isPending) {
-    body = <p className="mt-6 text-slate-500">A pesquisar…</p>;
-  } else if (search.isError && search.data === undefined) {
-    body = (
-      <div className="mt-6 max-w-md space-y-4">
-        <Message kind="error">{errorMessage(search.error)}</Message>
-        <Button variant="secondary" onClick={() => void search.refetch()}>
-          Tentar novamente
-        </Button>
-      </div>
-    );
-  } else if (search.data.length === 0) {
-    body = <p className="mt-6 text-slate-500">Nenhum resultado para «{term}».</p>;
-  } else {
-    body = (
-      <>
-        {search.isError && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Message kind="error">{errorMessage(search.error)}</Message>
-            <Button variant="secondary" onClick={() => void search.refetch()}>
-              Tentar novamente
-            </Button>
-          </div>
-        )}
-        <p className="mt-2 text-sm text-slate-600">
-          {search.data.length >= MAX_RESULTS
-            ? `Mostram-se os primeiros ${MAX_RESULTS} resultados. Escreva mais para os afinar.`
-            : `${search.data.length} ${search.data.length === 1 ? "resultado" : "resultados"}`}
-        </p>
+  // Uma só linha de estado, sempre montada e com `role="status"`: o foco fica na caixa de pesquisa e os leitores de ecrã só anunciam
+  // o que muda dentro de uma região viva (uma linha nova a cada estado não seria anunciada).
+  let status = "";
+  if (term === "") status = "Escreva o que procura na caixa de pesquisa.";
+  else if (problem !== null) status = problem;
+  else if (results !== undefined) {
+    if (results.length === 0) status = `Nenhum resultado para «${term}».`;
+    else if (results.length >= MAX_RESULTS) status = `Mostram-se os primeiros ${MAX_RESULTS} resultados. Escreva mais para os afinar.`;
+    else status = `${results.length} ${results.length === 1 ? "resultado" : "resultados"}`;
+  } else if (search.isPending) status = "A pesquisar…";
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold tracking-tight break-words">
+        {problem === null ? `Resultados para «${term}»` : "Pesquisa"}
+      </h1>
+      <p role="status" className="mt-4 text-sm text-slate-600">
+        {status}
+      </p>
+      {problem === null && search.isError && (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Message kind="error">{errorMessage(search.error)}</Message>
+          <Button variant="secondary" onClick={() => void search.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
+      {results !== undefined && results.length > 0 && (
         <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-          {search.data.map((result) =>
+          {results.map((result) =>
             result.kind === "folder" ? (
               <FolderRow key={`folder-${result.folder.id}`} folder={result.folder} path={result.path} />
             ) : (
@@ -1357,16 +1418,7 @@ export default function SearchPage() {
             ),
           )}
         </ul>
-      </>
-    );
-  }
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight break-words">
-        {problem === null ? `Resultados para «${term}»` : "Pesquisa"}
-      </h1>
-      {body}
+      )}
     </div>
   );
 }
@@ -1429,12 +1481,12 @@ por:
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/SearchPage.test.tsx src/web/components/Location.test.tsx`
-Expected: `Test Files  2 passed (2)`, `Tests  12 passed (12)`.
+Expected: `Test Files  2 passed (2)`, `Tests  14 passed (14)`.
 
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  26 passed (26)`, `Tests  172 passed (172)`.
+Expected: `Test Files  26 passed (26)`, `Tests  175 passed (175)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -1459,13 +1511,25 @@ git commit -m "Acrescenta a pesquisa por nome: caixa na barra lateral, página d
 
 **Interfaces:**
 - Consumes: `useTrash`, `useRestoreFile`, `usePurgeFile`, `useEmptyTrash` (Task 2), `Location` (Task 3), `ConfirmDialog`, `ApiRequestError`, `formatBytes`, `formatDate`.
-- Produces: a rota `/lixeira` (`TrashPage`) e a ligação «Lixeira» na barra lateral; `ConfirmDialog` com a propriedade opcional `pendingLabel` (por defeito «A excluir…»).
+- Produces: a rota `/lixeira` (`TrashPage`) e a ligação «Lixeira» na barra lateral; `ConfirmDialog` com a propriedade opcional `pendingLabel` (por defeito «A excluir…») e que não se fecha, nem por Esc ou clique no fundo, enquanto `pending`.
 
-- [ ] **Step 1: `ConfirmDialog` com o texto de «a decorrer» configurável (teste primeiro)**
+- [ ] **Step 1: `ConfirmDialog`: texto de «a decorrer» configurável e sem fechar enquanto a ação decorre (testes primeiro)**
 
-Pendente do Plano 2B: o botão dizia sempre «A excluir…». Na lixeira a ação é «A eliminar…». A propriedade é opcional e o valor por defeito é o de hoje, por isso nada mais muda.
+Pendente do Plano 2B: o botão dizia sempre «A excluir…». Na lixeira a ação é «A eliminar…». A propriedade é opcional e o valor por defeito é o de hoje, por isso nada mais muda. Além disso, enquanto o pedido decorre o diálogo não se pode fechar: se se fechasse (Esc, clique no fundo ou «Cancelar»), a página esquecia que havia uma ação a correr (o `reset()` da mutação só a desliga do componente) e voltava a ativar os botões da lista, enquanto o pedido, que não se cancela, continuava (um segundo «Esvaziar lixeira» em paralelo, ou restaurar um ficheiro que o ciclo está a eliminar). Por isso `ConfirmDialog` ignora o Esc e o fundo e desativa «Cancelar» enquanto `pending`: vale para a lixeira, para excluir um ficheiro ou uma pasta e para «Sair».
 
-Em `src/web/components/ConfirmDialog.test.tsx`, trocar:
+Em `src/web/components/ConfirmDialog.test.tsx`, nos `import`, trocar:
+
+```tsx
+import { render, screen } from "@testing-library/react";
+```
+
+por:
+
+```tsx
+import { fireEvent, render, screen } from "@testing-library/react";
+```
+
+No fim do `describe`, trocar:
 
 ```tsx
     expect(screen.getByRole("button", { name: "A excluir…" })).toBeDisabled();
@@ -1484,11 +1548,29 @@ por:
     expect(screen.getByRole("button", { name: "A eliminar…" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "A excluir…" })).not.toBeInTheDocument();
   });
+
+  it("enquanto a ação decorre, «Cancelar» está desativado (não a pode parar)", () => {
+    setup({ pending: true });
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
+  });
+
+  it("enquanto a ação decorre, Esc e o fundo não fecham o diálogo", () => {
+    const { onClose } = setup({ pending: true });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("quando não decorre nada, Esc fecha o diálogo", () => {
+    const { onClose } = setup();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/ConfirmDialog.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  1 failed | 3 passed (4)).
+Expected: FAIL (Test Files  1 failed (1); Tests  3 failed | 4 passed (7)).
 
 Em `src/web/components/ConfirmDialog.tsx`, trocar:
 
@@ -1539,8 +1621,34 @@ por:
 {pending ? pendingLabel : confirmLabel}
 ```
 
+No mesmo ficheiro, o diálogo ignora Esc e o fundo enquanto a ação decorre. Trocar:
+
+```tsx
+    <Modal title={title} onClose={onClose}>
+```
+
+por:
+
+```tsx
+    <Modal title={title} onClose={() => !pending && onClose()}>
+```
+
+No mesmo ficheiro, «Cancelar» fica desativado enquanto a ação decorre. Trocar:
+
+```tsx
+          <Button variant="secondary" onClick={onClose}>
+            Cancelar
+```
+
+por:
+
+```tsx
+          <Button variant="secondary" disabled={pending} onClick={onClose}>
+            Cancelar
+```
+
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/ConfirmDialog.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  4 passed (4)`.
+Expected: `Test Files  1 passed (1)`, `Tests  7 passed (7)`.
 
 - [ ] **Step 2: O ecrã da lixeira (testes primeiro)**
 
@@ -1549,7 +1657,7 @@ O ecrã lista os ficheiros excluídos (no máximo 200, os mais recentes; se há 
 Criar `src/web/pages/TrashPage.test.tsx`:
 
 ```tsx
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { TrashContents, TrashItem } from "../../shared/types";
@@ -1704,7 +1812,7 @@ describe("TrashPage: eliminar de vez", () => {
     const user = userEvent.setup();
     renderApp("/lixeira");
     expect(await screen.findByText("1,5 KB de 1 GB")).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     const dialog = screen.getByRole("dialog", { name: "Eliminar de vez" });
     expect(dialog).toHaveTextContent("Eliminar «relatório.pdf» de vez? Não se pode desfazer e o espaço é libertado.");
     expect(screen.getByRole("button", { name: "Cancelar" })).toHaveFocus();
@@ -1721,7 +1829,7 @@ describe("TrashPage: eliminar de vez", () => {
     const state = serve(trashOf([OLD]), { "DELETE /api/trash/:id": () => noContent() });
     const user = userEvent.setup();
     renderApp("/lixeira");
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(state.server.callsTo("DELETE /api/trash/:id")).toHaveLength(0);
@@ -1733,10 +1841,38 @@ describe("TrashPage: eliminar de vez", () => {
     });
     const user = userEvent.setup();
     renderApp("/lixeira");
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Eliminar de vez" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Ficheiro não encontrado na lixeira.");
     expect(screen.getByRole("dialog", { name: "Eliminar de vez" })).toBeInTheDocument();
+  });
+
+  it("enquanto elimina, Esc e o fundo não fecham o diálogo, «Cancelar» está desativado e a lista também", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = serve(trashOf([OLD, IN_ROOT]), {
+      "DELETE /api/trash/:id": async () => {
+        await gate;
+        state.set(trashOf([IN_ROOT]));
+        return noContent();
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/lixeira");
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
+    const dialog = screen.getByRole("dialog", { name: "Eliminar de vez" });
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar de vez" }));
+    await within(dialog).findByRole("button", { name: "A eliminar…" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(screen.getByRole("dialog", { name: "Eliminar de vez" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restaurar notas.txt" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(state.server.callsTo("DELETE /api/trash/:id")).toHaveLength(1);
   });
 });
 
@@ -1799,11 +1935,40 @@ describe("TrashPage: esvaziar", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Esvaziar lixeira" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
   });
+
+  it("enquanto esvazia, Esc e o fundo não fecham o diálogo, «Cancelar» está desativado e a lista também", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = serve(trashOf([OLD], 1), {
+      "DELETE /api/trash": async () => {
+        await gate;
+        state.set(trashOf([]));
+        return json({ purged: 1, remaining: 0 });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/lixeira");
+    await user.click(await screen.findByRole("button", { name: "Esvaziar lixeira" }));
+    const dialog = screen.getByRole("dialog", { name: "Esvaziar a lixeira" });
+    await user.click(within(dialog).getByRole("button", { name: "Esvaziar lixeira" }));
+    await within(dialog).findByText("A eliminar… 0 de 1");
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(screen.getByRole("dialog", { name: "Esvaziar a lixeira" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restaurar relatório.pdf" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("A lixeira está vazia.")).toBeInTheDocument();
+    expect(state.server.callsTo("DELETE /api/trash")).toHaveLength(1);
+  });
 });
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/TrashPage.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  16 failed (16)).
+Expected: FAIL (Test Files  1 failed (1); Tests  18 failed (18)).
 
 Criar `src/web/pages/TrashPage.tsx`:
 
@@ -1857,7 +2022,7 @@ function TrashRow({
         <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Restaurar ${item.name}`} onClick={onRestore}>
           {restoring ? "A restaurar…" : "Restaurar"}
         </Button>
-        <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Eliminar ${item.name} de vez`} onClick={onPurge}>
+        <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Eliminar de vez ${item.name}`} onClick={onPurge}>
           Eliminar de vez
         </Button>
       </span>
@@ -2047,12 +2212,12 @@ por:
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/TrashPage.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  16 passed (16)`.
+Expected: `Test Files  1 passed (1)`, `Tests  18 passed (18)`.
 
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  27 passed (27)`, `Tests  189 passed (189)`.
+Expected: `Test Files  27 passed (27)`, `Tests  197 passed (197)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2071,11 +2236,12 @@ git commit -m "Acrescenta o ecrã da lixeira com restaurar, eliminar de vez e es
 **Files:**
 - Create: `src/web/components/useDialog.ts`, `src/web/components/useDialog.test.ts`, `src/web/components/ShareDialog.tsx`, `src/web/components/ShareDialog.test.tsx`
 - Modify: `src/web/components/FileActions.tsx`, `src/web/components/FolderActions.tsx`, `src/web/components/FileActions.test.tsx`
+- Modify: `src/web/components/Modal.tsx`, `src/web/components/Modal.test.tsx`
 
 **Interfaces:**
 - Consumes: `useShares`, `useCreateShare`, `useRevokeShare`, `shareUrl` (Task 2), `Modal`, `Button`, `Message`, `formatDate`, `errorMessage`.
 - Produces: `useDialog<Name>(...mutations)` → `{ dialog, open, close }` (o diálogo aberto de um menu e como o fechar, repondo as mutações); `ShareDialog({ file, onClose })`;
-  «Partilhar…» no menu de cada ficheiro (também nos resultados da pesquisa).
+  «Partilhar…» no menu de cada ficheiro (também nos resultados da pesquisa); o `Modal` devolve o foco ao diálogo quando o elemento focado desaparece.
 
 - [ ] **Step 1: `useDialog`: o estado comum dos menus de ações (teste primeiro)**
 
@@ -2204,14 +2370,92 @@ export function FolderActions({ folder }: { folder: FolderItem }) {
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/FolderActions.test.tsx`
 Expected: `Test Files  1 passed (1)`, `Tests  5 passed (5)`.
 
-- [ ] **Step 2: O diálogo «Partilhar…» (testes primeiro)**
+- [ ] **Step 2: O foco não pode cair para fora de um diálogo (teste primeiro)**
 
-O diálogo cria links (sem validade, 1, 7 ou 30 dias), mostra o link completo **uma só vez** (a API só devolve o token na criação) com «Copiar», lista os links ativos (data de criação e validade, sem endereço) e revoga-os. Se o browser não deixa copiar (ligação não segura ou sem permissão), o texto fica selecionado e a mensagem explica como copiar à mão. Revogar o link que acabou de ser criado também tira o endereço do ecrã (já não funciona). Os erros da API (por exemplo, `409 too_many_shares`, que já vem em português) aparecem tal como vêm.
+O diálogo de partilha é o primeiro que altera a sua própria lista sem se fechar: ao revogar um link com o teclado, o botão «Revogar» (focado) desativa-se e a linha desaparece, o foco cai para o `<body>` e o Esc e o Tab, que o `Modal` trata no `onKeyDown` do próprio diálogo, deixam de chegar lá (o Esc já não fecha o diálogo e o Tab sai dele). Por isso, depois de cada renderização, o `Modal` devolve o foco ao diálogo se este saiu de lá. O teste usa um diálogo cujo botão se remove a si próprio; o do diálogo de partilha (revogar com o teclado e carregar em Esc) está no passo seguinte.
+
+Em `src/web/components/Modal.test.tsx`, trocar:
+
+```tsx
+async function openModal() {
+```
+
+por:
+
+```tsx
+function VanishingHarness() {
+  const [shown, setShown] = useState(true);
+  return (
+    <Modal title="Um título" onClose={() => undefined}>
+      {shown && <button onClick={() => setShown(false)}>Remover-me</button>}
+    </Modal>
+  );
+}
+
+async function openModal() {
+```
+
+No fim do `describe`, trocar:
+
+```tsx
+    await user.click(screen.getByTestId("modal-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+```
+
+por:
+
+```tsx
+    await user.click(screen.getByTestId("modal-backdrop"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("se o elemento focado desaparece, o foco volta ao diálogo (o Esc e o Tab continuam a funcionar)", async () => {
+    const user = userEvent.setup();
+    render(<VanishingHarness />);
+    await user.click(screen.getByRole("button", { name: "Remover-me" }));
+    expect(screen.queryByRole("button", { name: "Remover-me" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Um título" })).toHaveFocus();
+  });
+});
+```
+
+Run: `npx vitest run -c vitest.web.config.ts src/web/components/Modal.test.tsx`
+Expected: FAIL (Test Files  1 failed (1); Tests  1 failed | 4 passed (5)).
+
+Em `src/web/components/Modal.tsx`, a seguir ao `useEffect` do `opener`, trocar:
+
+```tsx
+    return () => opener?.focus();
+  }, [opener]);
+```
+
+por:
+
+```tsx
+    return () => opener?.focus();
+  }, [opener]);
+
+  // Se o elemento focado desaparece (por exemplo, a linha de um link revogado), o foco cai para o <body>, onde o Esc e o Tab já não
+  // chegam ao diálogo (tratam-se no `onKeyDown` do próprio diálogo): depois de cada renderização, devolve-se-lhe o foco se o perdeu.
+  useEffect(() => {
+    const dialog = dialogRef.current!;
+    if (!dialog.contains(document.activeElement)) dialog.focus();
+  });
+```
+
+Run: `npx vitest run -c vitest.web.config.ts src/web/components/Modal.test.tsx`
+Expected: `Test Files  1 passed (1)`, `Tests  5 passed (5)`.
+
+- [ ] **Step 3: O diálogo «Partilhar…» (testes primeiro)**
+
+O diálogo cria links (sem validade, 1, 7 ou 30 dias), mostra o link completo **uma só vez** (a API só devolve o token na criação) com «Copiar», lista os links ativos (data de criação e validade, sem endereço) e revoga-os. Se o browser não deixa copiar (ligação não segura ou sem permissão), o texto fica selecionado e a mensagem explica como copiar à mão. Revogar o link que acabou de ser criado também tira o endereço do ecrã (já não funciona), e depois de criar um link o foco vai para o campo do endereço (que se seleciona ao receber o foco: Ctrl+C copia-o logo). Enquanto o link está a ser criado o diálogo não se fecha (Esc, fundo e «Fechar» ignorados): fechar a meio perdia o endereço, que só se vê uma vez, e deixava um link sem endereço a contar para o limite de 20. Os erros da API (por exemplo, `409 too_many_shares`, que já vem em português) aparecem tal como vêm.
 
 Criar `src/web/components/ShareDialog.test.tsx`:
 
 ```tsx
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { FileItem, ShareItem } from "../../shared/types";
@@ -2277,6 +2521,7 @@ describe("ShareDialog", () => {
     expect(created.getByLabelText("Link de partilha")).toHaveValue(`${window.location.origin}/s/tok-123`);
     expect(created.getByText(/não voltará a ser mostrado/)).toBeInTheDocument();
     expect(created.getByText(/sem validade/)).toBeInTheDocument();
+    expect(created.getByLabelText("Link de partilha")).toHaveFocus();
     expect(state.server.callsTo("POST /api/files/:id/shares")[0]).toMatchObject({ params: { id: "a1" }, body: {} });
     expect(await screen.findByText("Link 1: criado a 03/10/2026, sem validade")).toBeInTheDocument(); // a lista atualizou-se
   });
@@ -2326,6 +2571,7 @@ describe("ShareDialog", () => {
     const field = screen.getByLabelText("Link de partilha") as HTMLInputElement;
     expect(field.selectionStart).toBe(0);
     expect(field.selectionEnd).toBe(field.value.length);
+    expect(field).toHaveFocus();
   });
 
   it("o erro de links a mais (409) mostra a mensagem da API e não cria nada", async () => {
@@ -2348,6 +2594,49 @@ describe("ShareDialog", () => {
 
     expect(await screen.findByText("Ainda não há links ativos.")).toBeInTheDocument();
     expect(state.server.callsTo("DELETE /api/shares/:id")[0].params.id).toBe("s1");
+  });
+
+  it("depois de revogar com o teclado o foco continua no diálogo e o Esc fecha-o", async () => {
+    const state = setup([FOREVER], {
+      "DELETE /api/shares/:id": () => {
+        listed = [];
+        return noContent();
+      },
+    });
+    const revoke = await screen.findByRole("button", { name: "Revogar o link 1, criado a 03/10/2026" });
+    revoke.focus();
+    await state.user.keyboard("{Enter}");
+    expect(await screen.findByText("Ainda não há links ativos.")).toBeInTheDocument();
+
+    await state.user.keyboard("{Escape}");
+
+    expect(state.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("enquanto cria o link, Esc, o fundo e «Fechar» não fecham o diálogo (o endereço só aparece uma vez)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = setup([], {
+      "POST /api/files/:id/shares": async () => {
+        await gate;
+        listed = [FOREVER];
+        return json({ share: FOREVER, token: "tok-p" }, 201);
+      },
+    });
+    await state.user.click(await screen.findByRole("button", { name: "Criar link" }));
+    const dialog = screen.getByRole("dialog");
+    await within(dialog).findByRole("button", { name: "A criar…" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(state.onClose).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "Fechar" })).toBeDisabled();
+    release();
+    const created = within(await screen.findByRole("region", { name: "Link criado" }));
+    expect(created.getByLabelText("Link de partilha")).toHaveValue(`${window.location.origin}/s/tok-p`);
+    expect(within(dialog).getByRole("button", { name: "Fechar" })).toBeEnabled();
+    expect(state.onClose).not.toHaveBeenCalled();
   });
 
   it("revogar o link que acabou de ser criado esconde o endereço, que já não funciona", async () => {
@@ -2433,7 +2722,7 @@ Expected: FAIL (Test Files  1 failed (1); Tests  no tests).
 Criar `src/web/components/ShareDialog.tsx`:
 
 ```tsx
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDate } from "../../shared/format";
 import type { FileItem } from "../../shared/types";
 import { errorMessage } from "../api";
@@ -2474,6 +2763,12 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
   const [copy, setCopy] = useState<"copied" | "failed" | null>(null);
   const linkField = useRef<HTMLInputElement>(null);
 
+  // Depois de criar o link o foco vai para o campo (que se seleciona ao receber o foco): quem usa o teclado ou um leitor de ecrã
+  // fica no endereço, que só se vê uma vez, e Ctrl+C copia-o logo.
+  useEffect(() => {
+    if (created) linkField.current?.focus();
+  }, [created]);
+
   function createLink() {
     const days = validity === "" ? null : Number(validity);
     setCopy(null);
@@ -2488,13 +2783,14 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
       setCopy("copied");
     } catch {
       // Sem permissão ou sem ligação segura: seleciona o texto para o utilizador o copiar com o teclado.
+      linkField.current?.focus();
       linkField.current?.select();
       setCopy("failed");
     }
   }
 
   return (
-    <Modal title={`Partilhar «${file.name}»`} onClose={onClose}>
+    <Modal title={`Partilhar «${file.name}»`} onClose={() => !create.isPending && onClose()}>
       <div className="space-y-5">
         <p className="text-sm text-slate-700">Qualquer pessoa com o link pode descarregar este ficheiro, sem iniciar sessão.</p>
 
@@ -2586,7 +2882,7 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
         </section>
 
         <div className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={create.isPending} onClick={onClose}>
             Fechar
           </Button>
         </div>
@@ -2597,9 +2893,9 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/ShareDialog.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  14 passed (14)`.
+Expected: `Test Files  1 passed (1)`, `Tests  16 passed (16)`.
 
-- [ ] **Step 3: «Partilhar…» no menu de cada ficheiro (testes primeiro)**
+- [ ] **Step 4: «Partilhar…» no menu de cada ficheiro (testes primeiro)**
 
 Em `src/web/components/FileActions.test.tsx`, trocar:
 
@@ -2749,10 +3045,10 @@ por:
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/FileActions.test.tsx`
 Expected: `Test Files  1 passed (1)`, `Tests  7 passed (7)`.
 
-- [ ] **Step 4: Verificação e commit**
+- [ ] **Step 5: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  29 passed (29)`, `Tests  206 passed (206)`.
+Expected: `Test Files  29 passed (29)`, `Tests  217 passed (217)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2984,7 +3280,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  2 passed (2)`.
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  31 passed (31)`, `Tests  212 passed (212)`.
+Expected: `Test Files  31 passed (31)`, `Tests  223 passed (223)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3005,7 +3301,7 @@ git commit -m "Acrescenta a página pública do link de partilha e um teste que 
 
 **Files:**
 - Modify: `src/web/uploads-context.tsx`, `src/web/uploads-context.test.tsx`, `src/web/pages/FolderPage.tsx`, `src/web/pages/FolderPage.test.tsx`
-- Modify: `src/web/components/AppLayout.tsx`, `src/web/components/AppLayout.test.tsx`, `src/web/auth.ts`, `src/web/auth.test.tsx`
+- Modify: `src/web/components/AppLayout.tsx`, `src/web/components/AppLayout.test.tsx`, `src/web/auth.ts`, `src/web/auth.test.tsx`, `src/web/query-client.ts`
 
 **Interfaces:**
 - Consumes: `UploadManager` (Plano 2B), `useRefreshSpace` (Task 2 amplia-o), `ConfirmDialog` com `pendingLabel` (Task 4), `useLogout`, `stubXhr`, `mockApi`.
@@ -3014,7 +3310,7 @@ git commit -m "Acrescenta a página pública do link de partilha e um teste que 
 
 - [ ] **Step 1: Contextos separados e um só refresh por intervalo (testes primeiro)**
 
-Pendentes do Plano 2B. (1) `useUploads()` devolvia um objeto novo a cada passo de progresso, por isso a lista de «Meu espaço» (que só precisa de `add`) re-renderizava a cada tick: o estado passa para três contextos (as ações, que nunca mudam; «há envios em curso?», que muda duas vezes por lote; e a lista, que muda a cada passo), e a página passa a usar só as ações. (2) Cada envio que terminava mandava refazer as listagens, a árvore, a quota e agora também a lixeira e as pesquisas ativas: com 100 ficheiros eram 100 refrescos. O primeiro envio a terminar arma um temporizador (`REFRESH_WINDOW_MS`, 500 ms) e todos os que terminam até ele disparar entram no mesmo refresh; um lote longo continua a atualizar a lista de meio em meio segundo. Ao desmontar o provider o temporizador cancela-se (e os envios cancelados já não agendam nada). Os testes usam um intervalo curto (`refreshWindowMs`) com relógios reais.
+Pendentes do Plano 2B. (1) `useUploads()` devolvia um objeto novo a cada passo de progresso, por isso a lista de «Meu espaço» (que só precisa de `add`) re-renderizava a cada tick: o estado passa para três contextos (as ações, que nunca mudam; «há envios em curso?», que muda duas vezes por lote; e a lista, que muda a cada passo), e a página passa a usar só as ações. (2) Cada envio que terminava mandava refazer as listagens, a árvore, a quota e agora também a lixeira e as pesquisas ativas: com 100 ficheiros eram 100 refrescos. O primeiro envio a terminar arma um temporizador (`REFRESH_WINDOW_MS`, 500 ms) e todos os que terminam até ele disparar entram no mesmo refresh; um lote longo continua a atualizar a lista de meio em meio segundo. Ao desmontar o provider o temporizador cancela-se (e os envios cancelados já não agendam nada). Os testes usam um intervalo curto (`refreshWindowMs`) com relógios reais; os que afirmam que ainda não houve refresh, ou que não ficou nenhum agendado, usam intervalos de 200 a 400 ms e despejam as microtarefas com `await act(async () => {})` em vez de `waitFor` (que só consulta de 50 em 50 ms): com margens de 50 ms um atraso do processo de testes dava falhas que não eram defeitos.
 
 Em `src/web/uploads-context.test.tsx`, nos `import`, trocar:
 
@@ -3103,7 +3399,7 @@ describe("UploadsProvider: um refresh por intervalo", () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   it("vários envios que terminam juntos dão um só refresh, e só depois do intervalo", async () => {
-    const { hook, server, Xhr } = setup(1000, 150);
+    const { hook, server, Xhr } = setup(1000, 400);
     await waitFor(() => expect(hook.result.current.me.data).toBeDefined());
     expect(sessionCalls(server)).toBe(1);
 
@@ -3140,7 +3436,7 @@ describe("UploadsProvider: um refresh por intervalo", () => {
   });
 
   it("ao desmontar o provider não fica um refresh agendado", async () => {
-    const { hook, server, Xhr, client } = setup(1000, 100);
+    const { hook, server, Xhr, client } = setup(1000, 200);
     await waitFor(() => expect(hook.result.current.me.data).toBeDefined());
     // Outro observador da sessão, fora do provider, para um refresh agendado se notar nos pedidos.
     const observer = renderHook(() => useMe(), { wrapper: queryWrapper(client) });
@@ -3149,9 +3445,10 @@ describe("UploadsProvider: um refresh por intervalo", () => {
 
     act(() => hook.result.current.uploads.add([new File(["abc"], "a.txt")], null));
     act(() => Xhr.instances[0].respond(201, { file: FILE_ITEM }));
-    await waitFor(() => expect(hook.result.current.uploads.items[0].status).toBe("done"));
+    await act(async () => {}); // despeja as microtarefas que correm `finish` -> `onSettled`, que arma o temporizador
+    expect(hook.result.current.uploads.items[0].status).toBe("done");
     hook.unmount();
-    await sleep(300);
+    await sleep(600); // mais do que o intervalo
 
     expect(sessionCalls(server)).toBe(before);
   });
@@ -3393,9 +3690,9 @@ npx vitest run -c vitest.web.config.ts src/web/uploads-context.test.tsx src/web/
 ```
 Expected: `Test Files  3 passed (3)`, `Tests  36 passed (36)`.
 
-- [ ] **Step 2: Terminar a sessão sem depender de quem a chama re-renderizar (teste primeiro)**
+- [ ] **Step 2: Terminar a sessão sem depender de quem a chama e sem deixar nada para trás (testes primeiro)**
 
-Mover o «Sair» para um componente próprio (passo seguinte) mostrou um defeito que estava escondido: `useLogout` fazia `queryClient.clear()` e depois `setQueryData(ME_KEY, null)`. O `clear()` tira a consulta da sessão da cache e quem a observa (o layout, em `useMe`) só passava a ver a nova quando voltava a renderizar; isso só acontecia porque o layout era também quem chamava o `useLogout`. Com o «Sair» noutro componente, o layout ficava a mostrar a sessão antiga e a navegação para o login não acontecia. O 401 já fazia a coisa certa (`createQueryClient`: `removeQueries` das outras consultas e `setQueryData` da sessão); o `useLogout` passa a fazer o mesmo. O teste põe o observador da sessão num componente à parte, que é a situação que falhava.
+Mover o «Sair» para um componente próprio (passo seguinte) mostrou um defeito que estava escondido: `useLogout` fazia `queryClient.clear()` e depois `setQueryData(ME_KEY, null)`. O `clear()` tira a consulta da sessão da cache e quem a observa (o layout, em `useMe`) só passava a ver a nova quando voltava a renderizar; isso só acontecia porque o layout era também quem chamava o `useLogout`. Com o «Sair» noutro componente, o layout ficava a mostrar a sessão antiga e a navegação para o login não acontecia. O 401 já evitava o `clear()` (`createQueryClient`: `removeQueries` das outras consultas e `setQueryData` da sessão). Mas essa receita, copiada tal e qual, perderia duas coisas que o `clear()` também garantia: (a) um pedido da sessão ainda a decorrer, cuja resposta tardia repunha o utilizador por cima do `null` (cada refresh depois de um envio invalida a sessão, por isso o risco é maior em «Sair» com envios em curso); (b) a cache das mutações, que guarda as variáveis do login e da troca de senha e o token de uma partilha durante o `gcTime` (5 minutos). O fim de sessão (terminar a sessão ou um 401) passa a fazer-se num só sítio, `forgetAccount`: cancela a consulta da sessão, tira as outras consultas, esvazia a cache das mutações e põe a sessão a `null`, por esta ordem (o cancelamento repõe o estado anterior da consulta, por isso tem de vir antes do `setQueryData`). Os testes: o primeiro põe o observador da sessão num componente à parte (a situação que falhava); os outros dois fixam (a) e (b) e passam já com o `clear()`: guardam a troca.
 
 Em `src/web/auth.test.tsx`, nos `import`, trocar:
 
@@ -3419,7 +3716,7 @@ import { apiError, json, ME, mockApi } from "./test/mock-api";
 por:
 
 ```tsx
-import { useLogout, useMe } from "./auth";
+import { ME_KEY, useChangePassword, useLogout, useMe } from "./auth";
 import { apiError, json, ME, mockApi, noContent } from "./test/mock-api";
 ```
 
@@ -3445,13 +3742,95 @@ describe("useLogout", () => {
     await waitFor(() => expect(me.result.current.data).toBeNull());
     expect(client.getQueryData(["folder", "root"])).toBeUndefined();
   });
+
+  it("uma resposta tardia da sessão não repõe o utilizador depois de terminar a sessão", async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    mockApi({
+      "GET /api/auth/me": async () => {
+        if (++calls === 1) return json({ user: ME });
+        await gate; // o segundo pedido fica à espera
+        return json({ user: ME });
+      },
+      "POST /api/auth/logout": () => noContent(),
+    });
+    const client = testQueryClient();
+    const wrapper = queryWrapper(client);
+    const me = renderHook(() => useMe(), { wrapper });
+    const logout = renderHook(() => useLogout(), { wrapper });
+    await waitFor(() => expect(me.result.current.data).toEqual(ME));
+    void client.invalidateQueries({ queryKey: ME_KEY }); // um refresh da sessão em curso
+    await waitFor(() => expect(calls).toBe(2));
+
+    await act(() => logout.result.current.mutateAsync());
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(me.result.current.data).toBeNull();
+  });
+
+  it("esvazia também a cache das mutações (variáveis de senhas, tokens)", async () => {
+    mockApi({
+      "GET /api/auth/me": () => json({ user: ME }),
+      "POST /api/auth/password": () => noContent(),
+      "POST /api/auth/logout": () => noContent(),
+    });
+    const client = testQueryClient();
+    const wrapper = queryWrapper(client);
+    const change = renderHook(() => useChangePassword(), { wrapper });
+    const logout = renderHook(() => useLogout(), { wrapper });
+    await act(() => change.result.current.mutateAsync({ currentPassword: "velha-senha", newPassword: "nova-senha" }));
+    expect(client.getMutationCache().getAll()).toHaveLength(1);
+
+    await act(() => logout.result.current.mutateAsync());
+
+    expect(client.getMutationCache().getAll()).toHaveLength(0);
+  });
 });
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/auth.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  1 failed | 4 passed (5)).
+Expected: FAIL (Test Files  1 failed (1); Tests  2 failed | 5 passed (7)).
 
-Em `src/web/auth.ts`, em `useLogout`, trocar:
+Em `src/web/auth.ts`, nos `import`, trocar:
+
+```ts
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+```
+
+por:
+
+```ts
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+```
+
+Antes de `useLogout`, acrescentar a função (trocar):
+
+```ts
+export function useLogout() {
+```
+
+por:
+
+```ts
+/**
+ * Fim de sessão (terminar a sessão ou um 401): esquece tudo o que era da conta e deixa a sessão a `null`.
+ * Não usa `clear()`, que tirava a consulta da sessão da cache e só quem voltasse a renderizar dava pela nova; faz à mão o que ele
+ * garantia: cancela um pedido da sessão ainda a decorrer (uma resposta tardia repunha o utilizador por cima do `null`) e esvazia
+ * a cache das mutações (guarda as variáveis do login e da troca de senha, e o token de uma partilha, durante o `gcTime`).
+ */
+export function forgetAccount(client: QueryClient): void {
+  void client.cancelQueries({ queryKey: ME_KEY });
+  client.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
+  client.getMutationCache().clear();
+  client.setQueryData(ME_KEY, null);
+}
+
+export function useLogout() {
+```
+
+Em `useLogout`, trocar:
 
 ```ts
     onSuccess: () => {
@@ -3463,20 +3842,47 @@ Em `src/web/auth.ts`, em `useLogout`, trocar:
 por:
 
 ```ts
-    // Esquece tudo o que era da conta e deixa a sessão a `null`, como no 401 (ver `createQueryClient`). Sem `clear()`: ele tirava a
-    // consulta da sessão da cache e quem a observa só dava pela nova ao re-renderizar.
-    onSuccess: () => {
-      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
-      queryClient.setQueryData(ME_KEY, null);
-    },
+    // Ver forgetAccount.
+    onSuccess: () => forgetAccount(queryClient),
 ```
 
-Run: `npx vitest run -c vitest.web.config.ts src/web/auth.test.tsx src/web/components/AppLayout.test.tsx`
-Expected: `Test Files  2 passed (2)`, `Tests  15 passed (15)`.
+Em `src/web/query-client.ts`, o 401 faz o mesmo. Nos `import`, trocar:
+
+```ts
+import { ME_KEY } from "./auth";
+```
+
+por:
+
+```ts
+import { forgetAccount } from "./auth";
+```
+
+No mesmo ficheiro, trocar:
+
+```ts
+  setUnauthorizedHandler(() => {
+    client.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
+    client.setQueryData(ME_KEY, null);
+  });
+```
+
+por:
+
+```ts
+  setUnauthorizedHandler(() => forgetAccount(client));
+```
+
+Run:
+
+```bash
+npx vitest run -c vitest.web.config.ts src/web/auth.test.tsx src/web/query-client.test.ts src/web/components/AppLayout.test.tsx
+```
+Expected: `Test Files  3 passed (3)`, `Tests  20 passed (20)`.
 
 - [ ] **Step 3: «Sair» com envios em curso pede confirmação (testes primeiro)**
 
-Pendente do Plano 2B: «Sair» cancelava os envios em silêncio (o provider desmonta e a fila aborta tudo). Agora, se há envios em espera ou a decorrer, abre-se uma confirmação. Para a barra lateral saber se há envios, o `UploadsProvider` passa a envolver o layout inteiro e não só a área principal; o «Sair» vira um componente próprio que lê `useUploadsBusy()` (só re-renderiza quando «ocupado» muda, não a cada progresso). Um erro ao terminar a sessão aparece no diálogo quando ele está aberto e por baixo do botão quando não está, nunca nos dois.
+Pendente do Plano 2B: «Sair» cancelava os envios em silêncio (o provider desmonta e a fila aborta tudo). Agora, se há envios em espera ou a decorrer, abre-se uma confirmação. Para a barra lateral saber se há envios, o `UploadsProvider` passa a envolver o layout inteiro e não só a área principal; o «Sair» vira um componente próprio que lê `useUploadsBusy()` (só re-renderiza quando «ocupado» muda, não a cada progresso). Um erro ao terminar a sessão aparece no diálogo quando ele está aberto e por baixo do botão quando não está, nunca nos dois, e um erro de uma tentativa antiga não aparece num diálogo que ainda ninguém confirmou (`logout.reset()` antes de o abrir). O diálogo não se fecha enquanto o pedido decorre (é o `ConfirmDialog` da Task 4).
 
 Em `src/web/components/AppLayout.test.tsx`, nos `import`, trocar:
 
@@ -3582,6 +3988,26 @@ describe("AppLayout: «Sair» com envios em curso", () => {
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
   });
 
+  it("um erro antigo de «Sair» não aparece no diálogo quando ele se abre", async () => {
+    stubXhr();
+    mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": () => json({ user: ME }),
+      "GET /api/config": () => json({ maxUploadBytes: 1_000_000 }),
+      "POST /api/auth/logout": () => apiError(500, "internal_error", "Erro interno do servidor."),
+    });
+    const user = userEvent.setup();
+    renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Sair" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
+    await startUpload(user);
+
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Sair com envios em curso" });
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("sem envios, «Sair» não pergunta nada", async () => {
     const server = serveSession();
     const user = userEvent.setup();
@@ -3595,7 +4021,7 @@ describe("AppLayout: «Sair» com envios em curso", () => {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/AppLayout.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  3 failed | 11 passed (14)).
+Expected: FAIL (Test Files  1 failed (1); Tests  4 failed | 11 passed (15)).
 
 Substituir o conteúdo de `src/web/components/AppLayout.tsx`:
 
@@ -3636,7 +4062,12 @@ function LogoutButton() {
         variant="secondary"
         className="w-full"
         disabled={logout.isPending}
-        onClick={() => (busy ? setConfirming(true) : logout.mutate())}
+        onClick={() => {
+          if (busy) {
+            logout.reset(); // um erro de uma tentativa antiga não pode aparecer num diálogo que ainda ninguém confirmou
+            setConfirming(true);
+          } else logout.mutate();
+        }}
       >
         Sair
       </Button>
@@ -3731,12 +4162,12 @@ export default function AppLayout() {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/AppLayout.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  14 passed (14)`.
+Expected: `Test Files  1 passed (1)`, `Tests  15 passed (15)`.
 
 - [ ] **Step 4: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  31 passed (31)`, `Tests  223 passed (223)`.
+Expected: `Test Files  31 passed (31)`, `Tests  237 passed (237)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3818,10 +4249,10 @@ Na secção «Plano 3», no ponto «Para o 3B (interface)», trocar:
 por:
 
 ```markdown
-- Resolvido no 3B (interface): esvaziar a lixeira repete `DELETE /api/trash` até `remaining` ser 0 (ou `purged` ser 0), com progresso; a lixeira mostra os 200 mais recentes e diz quantos há (`total`); o link completo só se mostra uma vez, na criação, e deixa de se ver se esse link for revogado; o código comum de `FolderActions`/`FileActions` está em `useDialog`; o contexto dos envios divide-se em ações, «ocupado» e lista (a página da pasta já não re-renderiza com o progresso); um refresh por intervalo de 500 ms em vez de um por ficheiro enviado; «Sair» com envios em curso pede confirmação; testes de `useDeleteFolder`/`useUpdateFile`; `formatDate` com valores inválidos; o 409 do restauro tem uma mensagem própria; um teste garante que `index.html` e o CSS não carregam recursos de outras origens (e que os cabeçalhos estáticos têm `Referrer-Policy`); `ConfirmDialog` com o texto de «a decorrer» configurável (`pendingLabel`).
-- Resolvido no 3B (defeito latente): `useLogout` fazia `queryClient.clear()`, e só funcionava porque o layout, que observa a sessão, era também quem chamava o hook (re-renderizava e apanhava a consulta nova); passou a fazer como o 401 (`removeQueries` das outras consultas e `setQueryData` da sessão), que notifica os observadores logo.
+- Resolvido no 3B (interface): esvaziar a lixeira repete `DELETE /api/trash` até `remaining` ser 0 (ou `purged` ser 0), com progresso; a lixeira mostra os 200 mais recentes e diz quantos há (`total`); o link completo só se mostra uma vez, na criação, e deixa de se ver se esse link for revogado; o código comum de `FolderActions`/`FileActions` está em `useDialog`; o contexto dos envios divide-se em ações, «ocupado» e lista (a página da pasta já não re-renderiza com o progresso); um refresh por intervalo de 500 ms em vez de um por ficheiro enviado; «Sair» com envios em curso pede confirmação; testes de `useDeleteFolder`/`useUpdateFile`; `formatDate` com valores inválidos; o 409 do restauro tem uma mensagem própria; um teste garante que `index.html` e o CSS não carregam recursos de outras origens (e que os cabeçalhos estáticos têm `Referrer-Policy`); `ConfirmDialog` com o texto de «a decorrer» configurável (`pendingLabel`); o foco fica no campo de pesquisa depois de pesquisar; o `Modal` devolve o foco ao diálogo quando o elemento focado desaparece (por exemplo, a linha de um link revogado); um `ConfirmDialog` ignora Esc e o fundo enquanto a ação decorre (e o diálogo de partilha faz o mesmo enquanto cria o link), com «Cancelar» e «Fechar» desativados; a pesquisa anuncia o seu estado numa região viva (`role="status"`) e o diálogo de partilha leva o foco para o link criado; o botão «Eliminar de vez» tem o texto visível no nome acessível.
+- Resolvido no 3B (defeito latente): `useLogout` fazia `queryClient.clear()`, e só funcionava porque o layout, que observa a sessão, era também quem chamava o hook (re-renderizava e apanhava a consulta nova); passou a fazer como o 401, e os dois usam o mesmo `forgetAccount` (cancela um pedido da sessão ainda a decorrer, `removeQueries` das outras consultas, esvazia a cache das mutações, que guardava senhas e tokens, e põe a sessão a `null`).
 - Decisão do 3B: a caixa de pesquisa fica na barra lateral, em todas as páginas, e os resultados numa página própria (`/pesquisa?q=`), em vez de uma lista dentro de «Meu espaço»: o endereço guarda-se e o botão «Voltar» funciona. Pesquisa-se com Enter, não a cada tecla.
-- Fica sem plano (3B, achados menores): fechar o diálogo de esvaziar a lixeira enquanto corre não o pára (o ciclo continua em segundo plano, sem progresso; a lista atualiza-se no fim); a lixeira não se atualiza sozinha enquanto está aberta (outro separador pode excluir ou restaurar); a caixa de pesquisa mantém o texto escrito se se mudar de página sem pesquisar; «Revogar» não pede confirmação (criar outro link é barato, mas o endereço novo é diferente); a lista de links ativos não distingue os links por nenhum rótulo além do número e da data (e não se pode dar um nome a cada link).
+- Fica sem plano (3B, achados menores): a lixeira não se atualiza sozinha enquanto está aberta (outro separador pode excluir ou restaurar); os avisos de restauro e de erro ficam no ecrã até à ação seguinte, mesmo depois de eliminar ou esvaziar; depois de eliminar de vez ou esvaziar, o foco cai para o corpo da página (o botão que abriu o diálogo desapareceu ou ficou desativado); o texto de progresso de «Esvaziar lixeira» («A eliminar… x de N») e o «A lixeira está vazia.» não são regiões vivas (`aria-live`); a caixa de pesquisa mantém o texto escrito se se mudar de página sem pesquisar; «Revogar» não pede confirmação; os links ativos só se distinguem pelo número e pela data (e não se pode dar um nome a cada link).
 ```
 
 Na secção «Plano 2B», trocar:
@@ -3846,6 +4277,18 @@ por:
 
 ```markdown
 **Plano 3 (lixeira, pesquisa, partilha): a API ficou no Plano 3A e a interface no Plano 3B**
+```
+
+Na secção «Plano 5 (deploy)», no ponto da revisão final do 2B (passagem de acessibilidade), o «A excluir…» fixo já foi resolvido (`pendingLabel`). Trocar:
+
+```markdown
+`ConfirmDialog` sem `aria-describedby` e com «A excluir…» fixo
+```
+
+por:
+
+```markdown
+`ConfirmDialog` sem `aria-describedby`
 ```
 
 Na secção «Plano 5 (deploy)», antes do ponto «Novo (revisão final do 3A)», trocar:
@@ -3877,7 +4320,7 @@ Run: `npx vitest run`
 Expected: `Test Files  31 passed (31)`, `Tests  271 passed (271)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  31 passed (31)`, `Tests  223 passed (223)`.
+Expected: `Test Files  31 passed (31)`, `Tests  237 passed (237)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3909,14 +4352,16 @@ git commit -m "Documenta a interface da lixeira, da pesquisa e da partilha e fec
 | Pendente do Plano 2B: contexto dos envios em itens e ações; um refresh por ficheiro enviado; «Sair» com envios em curso | Task 7 |
 | Pendente do Plano 2B: testes de `useDeleteFolder` e `useUpdateFile`; `formatDate` com `NaN`; `ConfirmDialog` com «A excluir…» fixo | Tasks 1 e 4 |
 | Pendente do Plano 3: o 409 do restauro com mensagem própria; a página pública sem recursos de terceiros | Tasks 4 e 6 |
-| Defeito encontrado ao escrever o plano: `useLogout` dependia de o layout o chamar | Task 7 |
+| Defeito encontrado ao escrever o plano: `useLogout` dependia de o layout o chamar; e o fim de sessão tem de manter o que o `clear()` garantia (pedido da sessão em curso, cache das mutações) | Task 7 (e `gcTime: 0` na Task 2) |
+| Acessibilidade: foco depois de pesquisar e de criar um link, região viva da pesquisa, diálogos que não se fecham a meio de uma ação, foco devolvido ao diálogo, nome acessível de «Eliminar de vez» | Tasks 3, 4, 5 e 7 |
 
 **Fora deste plano:** o painel de administração e o cron de manutenção (Plano 4); o deploy, o Playwright e a passagem de acessibilidade em browser real (Plano 5). Nenhuma rota da API muda.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 31 passed (31); Tests 271 passed (271). Interface: Test Files 31 passed (31); Tests 223 passed (223).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 31 passed (31); Tests 271 passed (271). Interface: Test Files 31 passed (31); Tests 237 passed (237).
 
 ## Notas da execução
 
 - **Decisões de desenho que a especificação deixa em aberto:** a caixa de pesquisa fica na barra lateral, em todas as páginas, e os resultados numa página própria (`/pesquisa?q=`), em vez de uma lista dentro de «Meu espaço» (a spec fala de um cabeçalho com pesquisa, que só existiria numa página): o endereço de uma pesquisa guarda-se e o botão «Voltar» funciona. Pesquisa-se com Enter ou «Pesquisar», não a cada tecla (sem *debounce*, sem entradas a mais no histórico, sem leituras da D1 a cada letra). O refresh depois dos envios é um por intervalo de 500 ms e não um por ficheiro. Revogar um link não pede confirmação.
 - **Defeitos que a verificação encontrou, já corrigidos neste plano:** `useLogout` fazia `queryClient.clear()` e só funcionava porque o layout era também quem chamava o hook; revogar o link acabado de criar deixava o endereço, já inválido, no diálogo. O primeiro foi apanhado ao mover o «Sair» para um componente próprio (os testes do layout deixaram de levar ao login) e o segundo no browser.
-- **Verificação manual:** o guião da Task 8 foi percorrido num browser real contra o `npm run dev` durante a escrita deste plano, com uma conta fictícia numa base local limpa (pesquisa, partilha com validade de 7 dias, página pública, `curl` do descarregamento com `Content-Disposition: attachment` e CSP, revogação, restauro com «(restaurado)», esvaziar a lixeira, a barra lateral num ecrã de 375 px: os pontos 1 a 4 do guião; o ponto 5, «Sair» com um envio grande, só tem os testes automáticos). O botão «Copiar» foi negado pela área de transferência do painel do Claude e o plano B (texto selecionado e a explicação) funcionou.
+- **Correções que as revisões acrescentaram a este plano (já nos passos acima):** a caixa de pesquisa já não é remontada (mantém o foco); o estado da pesquisa é uma região viva; os diálogos da lixeira, de excluir e de «Sair» não se fecham enquanto a ação decorre (`ConfirmDialog`), como o de partilha enquanto cria o link; o `Modal` devolve o foco ao diálogo se o elemento focado desaparece (revogar um link com o teclado); o fim de sessão é `forgetAccount` (cancela a sessão em curso, esvazia a cache das mutações); o token da partilha tem `gcTime: 0` e o foco vai para o link criado; o botão «Eliminar de vez» tem o texto visível no nome acessível; os testes dos temporizadores têm margens de 200 a 400 ms.
+- **Verificação manual:** o guião da Task 8 foi percorrido num browser real contra o `npm run dev` durante a escrita deste plano, com uma conta fictícia numa base local limpa (pesquisa, partilha com validade de 7 dias, página pública, `curl` do descarregamento com `Content-Disposition: attachment` e CSP, revogação, restauro com «(restaurado)», esvaziar a lixeira, a barra lateral num ecrã de 375 px). O botão «Copiar» foi negado pela área de transferência do painel do Claude e o plano B (texto selecionado e a explicação) funcionou. Depois da execução e da revisão final repetiu-se, sobre o código final, o essencial: o foco continua na caixa depois de pesquisar (e o estado da pesquisa é lido na região viva), depois de criar um link o foco vai para o endereço (selecionado), revogar com o teclado esconde o endereço e o Esc fecha o diálogo e devolve o foco ao botão do menu, a lixeira mostra os botões com o nome acessível novo, e «Sair» com um envio de 95 MB a decorrer mostra a confirmação (e «Sair» no diálogo termina a sessão).
