@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { registerUser } from "./auth-helpers";
 import { dbWithStatementHook } from "./db-helpers";
-import { countFiles, rawUpload, usedBytes } from "./file-helpers";
+import { countFiles, rawUpload, uploadOk, usedBytes } from "./file-helpers";
 import { resetState } from "./helpers";
 
 beforeEach(resetState);
@@ -10,6 +10,9 @@ beforeEach(resetState);
 describe("PUT /api/files: a reserva desapareceu antes de o envio acabar", () => {
   it("o objeto sai do R2, a quota não fica a dever nada e a resposta é 409 upload_expired (não 201)", async () => {
     const { cookie, user } = await registerUser("ana@example.com");
+    // Um ficheiro pronto da mesma conta: a quota só fica certa se a reserva do envio caducado for devolvida uma vez (duas devoluções
+    // desciam abaixo do tamanho deste ficheiro, e o `MAX(..., 0)` escondia-o se a conta estivesse vazia).
+    const kept = await uploadOk(cookie, "kept.txt", "abc");
     // Imediatamente antes do `UPDATE ... 'ready'`, faz o que a manutenção faz a um envio pendente velho: devolve o espaço e apaga a linha.
     const db = dbWithStatementHook(/SET status = 'ready'/, async () => {
       await env.DB.batch([
@@ -22,8 +25,8 @@ describe("PUT /api/files: a reserva desapareceu antes de o envio acabar", () => 
 
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "upload_expired" });
-    expect((await env.FILES.list({ prefix: "u/" })).objects).toHaveLength(0);
-    expect(await usedBytes(cookie)).toBe(0);
-    expect(await countFiles()).toBe(0);
+    expect((await env.FILES.list({ prefix: "u/" })).objects.map((object) => object.key)).toEqual([`u/${user.id}/${kept.id}`]); // só o ficheiro pronto
+    expect(await usedBytes(cookie)).toBe(kept.size);
+    expect(await countFiles()).toBe(1);
   });
 });

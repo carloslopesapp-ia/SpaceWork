@@ -78,10 +78,25 @@ describe("UserActions: quota", () => {
     expect(server.callsTo("PATCH /api/admin/users/:id")).toHaveLength(0);
   });
 
+  it("guardar sem editar o campo fecha o diálogo e não grava (o campo arredonda a quota, que pode não ser um valor exato em GB)", async () => {
+    const server = mockApi({ "PATCH /api/admin/users/:id": () => json({ user: ANA }) });
+    const user = setup({ ...ANA, quotaBytes: 1_000_000 });
+    await choose(user, "Alterar quota…");
+    const dialog = screen.getByRole("dialog", { name: "Quota de ana@example.com" });
+    expect(within(dialog).getByLabelText("Quota (GB)")).toHaveValue("0");
+
+    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(server.callsTo("PATCH /api/admin/users/:id")).toHaveLength(0);
+  });
+
   it("um erro do servidor fica no diálogo, que continua aberto", async () => {
     mockApi({ "PATCH /api/admin/users/:id": () => apiError(409, "account_deleting", "Esta conta está a ser removida.") });
     const user = setup();
     await choose(user, "Alterar quota…");
+    await user.clear(screen.getByLabelText("Quota (GB)"));
+    await user.type(screen.getByLabelText("Quota (GB)"), "2");
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Esta conta está a ser removida.");
     expect(screen.getByRole("dialog", { name: "Quota de ana@example.com" })).toBeInTheDocument();
@@ -99,6 +114,8 @@ describe("UserActions: quota", () => {
     const user = setup();
     await choose(user, "Alterar quota…");
     const dialog = screen.getByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("Quota (GB)"));
+    await user.type(within(dialog).getByLabelText("Quota (GB)"), "2");
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await within(dialog).findByRole("button", { name: "A guardar…" });
 

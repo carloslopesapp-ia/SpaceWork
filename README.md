@@ -112,6 +112,8 @@ A **caixa de pesquisa** está na barra lateral de todas as páginas: Enter leva 
 
 As contas de administrador só têm a quota, e uma conta «A remover» não tem menu.
 
+Não fazer `git push` sem confirmação do dono do projeto.
+
 ## Manutenção
 
 Um cron (`0 * * * *`, de hora a hora, em `wrangler.jsonc`) corre `src/worker/cron.ts`. Cada execução trabalha em lotes limitados, para caber nos 50 subpedidos por invocação do plano gratuito do Workers (no pior caso gasta 32), e cada passo falha sozinho: se um falha, os outros correm na mesma e a execução termina com erro (fica visível no painel da Cloudflare).
@@ -128,5 +130,3 @@ curl -X POST "http://localhost:5173/cdn-cgi/local/explorer/api/local/scheduled?w
 ```
 
 Em produção os erros de cada execução ficam nos registos do Worker (`wrangler tail` ou o painel da Cloudflare).
-
-Não fazer `git push` sem confirmação do dono do projeto.

@@ -19,11 +19,17 @@ interface QuotaDialogProps {
 
 /** Muda a quota de uma conta, em GB. Uma quota abaixo do uso atual é permitida: só impede novos envios. */
 export function QuotaDialog({ user, pending, error, onSubmit, onClose }: QuotaDialogProps) {
-  const [text, setText] = useState(quotaToGbText(user.quotaBytes));
+  // O campo arredonda a quota a duas casas: guardar sem o editar não pode regravar a quota com o valor arredondado.
+  const [initialText] = useState(() => quotaToGbText(user.quotaBytes));
+  const [text, setText] = useState(initialText);
   const [localError, setLocalError] = useState<string | null>(null);
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (text.trim() === initialText) {
+      onClose();
+      return;
+    }
     const bytes = parseQuotaGb(text);
     setLocalError(bytes === null ? QUOTA_HINT : null);
     if (bytes !== null) onSubmit(bytes);

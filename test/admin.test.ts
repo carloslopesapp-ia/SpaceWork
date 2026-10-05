@@ -5,7 +5,7 @@ import { MAX_QUOTA_BYTES } from "../src/shared/validation";
 import { app } from "../src/worker/app";
 import { runMaintenance } from "../src/worker/cron";
 import { insertUser, login, registerAdmin, registerUser } from "./auth-helpers";
-import { dbWithBatchHook, fetchWithEnv } from "./db-helpers";
+import { dbWithBatchHook, dbWithStatementHook, fetchWithEnv } from "./db-helpers";
 import { uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { api, buildRequest, resetState, sessionCookie } from "./helpers";
 
@@ -185,6 +185,24 @@ describe("PATCH /api/admin/users/:id: suspender e reativar", () => {
     expect((await api("/api/auth/me", { cookie: other.cookie })).status).toBe(200);
 
     expect((await patch(admin.cookie, admin.user.id, { quotaBytes: 5 })).status).toBe(200);
+  });
+
+  it("«Reativar» a competir com «Apagar»: a conta passa a `deleting` entre a leitura e o UPDATE e continua `deleting` (409 account_deleting)", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await insertUser("ana@example.com", { status: "suspended" });
+    // `before` corre imediatamente antes do UPDATE do pedido, depois de a rota ter lido a conta como `suspended`
+    const racingDb = dbWithStatementHook(/^\s*UPDATE users SET quota_bytes = COALESCE/, async () => {
+      await env.DB.prepare("UPDATE users SET status = 'deleting' WHERE id = ?1").bind(ana).run();
+    });
+
+    const res = await fetchWithEnv(
+      buildRequest(`/api/admin/users/${ana}`, { method: "PATCH", cookie: admin.cookie, json: { status: "active" } }),
+      { DB: racingDb },
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "account_deleting" });
+    expect(await statusOf(ana)).toBe("deleting"); // `deleting` é terminal: o cron vai varrer a conta
   });
 });
 
