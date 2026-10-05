@@ -46,6 +46,18 @@ describe("useCreateShare", () => {
     await act(() => result.current.mutateAsync(null).catch(() => undefined));
     await waitFor(() => expect(result.current.error).toMatchObject({ code: "too_many_shares" }));
   });
+
+  it("o token não fica na cache das mutações quando deixa de haver quem a observe", async () => {
+    mockApi({ "POST /api/files/:id/shares": () => json({ share: SHARE, token: "tok" }, 201) });
+    const client = testQueryClient();
+    const create = renderHook(() => useCreateShare("a"), { wrapper: queryWrapper(client) });
+    await act(() => create.result.current.mutateAsync(null));
+    expect(client.getMutationCache().getAll()).toHaveLength(1);
+
+    create.unmount();
+
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0));
+  });
 });
 
 describe("useRevokeShare", () => {

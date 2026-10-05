@@ -17,6 +17,8 @@ export function useShares(fileId: string) {
 export function useCreateShare(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    // O token só vive enquanto o diálogo está aberto: sem `gcTime`, a cache das mutações guardava-o 5 minutos.
+    gcTime: 0,
     mutationFn: (expiresAt: number | null) =>
       apiFetch<{ share: ShareItem; token: string }>(`/api/files/${encodeURIComponent(fileId)}/shares`, {
         method: "POST",

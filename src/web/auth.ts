@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { PublicUser } from "../shared/types";
 import { ApiRequestError, apiFetch } from "./api";
 
@@ -44,16 +44,25 @@ export function useRegister() {
   });
 }
 
+/**
+ * Fim de sessão (terminar a sessão ou um 401): esquece tudo o que era da conta e deixa a sessão a `null`.
+ * Não usa `clear()`, que tirava a consulta da sessão da cache e só quem voltasse a renderizar dava pela nova; faz à mão o que ele
+ * garantia: cancela um pedido da sessão ainda a decorrer (uma resposta tardia repunha o utilizador por cima do `null`) e esvazia
+ * a cache das mutações (guarda as variáveis do login e da troca de senha, e o token de uma partilha, durante o `gcTime`).
+ */
+export function forgetAccount(client: QueryClient): void {
+  void client.cancelQueries({ queryKey: ME_KEY });
+  client.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
+  client.getMutationCache().clear();
+  client.setQueryData(ME_KEY, null);
+}
+
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/api/auth/logout", { method: "POST" }),
-    // Esquece tudo o que era da conta e deixa a sessão a `null`, como no 401 (ver `createQueryClient`). Sem `clear()`: ele tirava a
-    // consulta da sessão da cache e quem a observa só dava pela nova ao re-renderizar.
-    onSuccess: () => {
-      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
-      queryClient.setQueryData(ME_KEY, null);
-    },
+    // Ver forgetAccount.
+    onSuccess: () => forgetAccount(queryClient),
   });
 }
 
