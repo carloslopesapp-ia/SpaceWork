@@ -5,7 +5,7 @@ import { ApiError, isUniqueViolation } from "../errors";
 import { FILE_COLUMNS, fileNameTaken, rowToFile, type FileRow } from "../lib/files";
 import { pathsForFolders, trailOf } from "../lib/paths";
 import { restoreCandidates } from "../lib/restore-names";
-import { purgeTrashed, TRASH_PURGE_BATCH } from "../lib/trash";
+import { PURGE_BATCH, purgeTrashed } from "../lib/purge";
 import { createAuthedRouter } from "./authed";
 
 export const trash = createAuthedRouter();
@@ -68,7 +68,7 @@ trash.delete("/:id", async (c) => {
 });
 
 /**
- * Esvazia a lixeira por blocos de `TRASH_PURGE_BATCH` ficheiros (para respeitar o limite de chamadas por invocação).
+ * Esvazia a lixeira por blocos de `PURGE_BATCH` ficheiros (para respeitar o limite de chamadas por invocação).
  * Responde `{ purged, remaining }`: quem chama repete até `remaining` ser 0 (ou `purged` ser 0, se outro pedido mexer na lixeira).
  */
 trash.delete("/", async (c) => {
@@ -77,7 +77,7 @@ trash.delete("/", async (c) => {
   const { results } = await db
     .prepare(
       `SELECT id FROM files WHERE user_id = ?1 AND status = 'ready' AND deleted_at IS NOT NULL
-       ORDER BY deleted_at, id LIMIT ${TRASH_PURGE_BATCH}`,
+       ORDER BY deleted_at, id LIMIT ${PURGE_BATCH}`,
     )
     .bind(userId)
     .all<{ id: string }>();

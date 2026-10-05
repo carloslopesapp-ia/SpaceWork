@@ -107,3 +107,38 @@ export function rawUpload(
   });
   return fetchWithEnv(request, override);
 }
+
+export interface SeedFile {
+  id: string;
+  size?: number;
+  status?: "ready" | "pending";
+  /** Na lixeira desde este instante. */
+  deletedAt?: number;
+  /** Criado neste instante (por defeito 1, ou seja, há muito tempo). */
+  createdAt?: number;
+}
+
+/** Insere linhas em `files` com o objeto no R2 e soma os tamanhos à quota do dono (como o upload e a lixeira deixam o estado). */
+export async function seedFiles(userId: string, files: SeedFile[]): Promise<void> {
+  await env.DB.batch([
+    ...files.map((file) =>
+      env.DB.prepare(
+        `INSERT INTO files (id, user_id, folder_id, name, name_norm, size, mime, r2_key, status, created_at, deleted_at)
+         VALUES (?1, ?2, NULL, ?1, ?1, ?3, 'text/plain', ?4, ?5, ?7, ?6)`,
+      ).bind(
+        file.id,
+        userId,
+        file.size ?? 10,
+        `u/${userId}/${file.id}`,
+        file.status ?? "ready",
+        file.deletedAt ?? null,
+        file.createdAt ?? 1,
+      ),
+    ),
+    env.DB.prepare("UPDATE users SET used_bytes = used_bytes + ?1 WHERE id = ?2").bind(
+      files.reduce((sum, file) => sum + (file.size ?? 10), 0),
+      userId,
+    ),
+  ]);
+  await Promise.all(files.map((file) => env.FILES.put(`u/${userId}/${file.id}`, "x")));
+}
