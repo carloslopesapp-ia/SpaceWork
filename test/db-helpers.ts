@@ -118,3 +118,73 @@ export function dbCountingPrepares(): { db: D1Database; sql: string[] } {
   });
   return { db, sql };
 }
+
+/** `DB` em Proxy cujo `prepare` lança quando o SQL casa com `pattern`: simula uma falha da D1 numa consulta. */
+export function dbFailingOn(pattern: RegExp): D1Database {
+  return new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop === "prepare") {
+        return (sql: string) => {
+          if (pattern.test(sql)) throw new Error("D1 em baixo");
+          return target.prepare(sql);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+const REAL_STATEMENT = Symbol("instrução real");
+
+/**
+ * `env` com `DB` e `FILES` em Proxy que contam os subpedidos: cada execução de uma instrução (`run`, `first`, `all`, `raw`), cada `batch` e
+ * cada operação do R2 é um subpedido (o plano gratuito do Workers dá 50 por invocação; uma `batch` com várias instruções conta uma vez).
+ */
+export function envCountingSubrequests(): { env: Env; count: () => number } {
+  let calls = 0;
+  const unwrap = (statement: D1PreparedStatement): D1PreparedStatement =>
+    (statement as unknown as Record<symbol, D1PreparedStatement | undefined>)[REAL_STATEMENT] ?? statement;
+
+  function wrap(statement: D1PreparedStatement): D1PreparedStatement {
+    return new Proxy(statement, {
+      get(target, prop) {
+        if (prop === REAL_STATEMENT) return target;
+        if (prop === "bind") return (...values: unknown[]) => wrap(target.bind(...values));
+        if (prop === "run" || prop === "first" || prop === "all" || prop === "raw") {
+          return (...args: unknown[]) => {
+            calls++;
+            return (target[prop] as (...rest: unknown[]) => unknown)(...args);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  const db = new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop === "prepare") return (sql: string) => wrap(target.prepare(sql));
+      if (prop === "batch") {
+        return (statements: D1PreparedStatement[]) => {
+          calls++;
+          return target.batch(statements.map(unwrap));
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const files = new Proxy(env.FILES, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        calls++;
+        return value.apply(target, args);
+      };
+    },
+  });
+  return { env: { ...env, DB: db, FILES: files } as Env, count: () => calls };
+}

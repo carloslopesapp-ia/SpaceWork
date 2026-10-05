@@ -18,6 +18,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "spacework-files" }],
+  "triggers": { "crons": ["0 * * * *"] },
   "vars": {
     "DEFAULT_QUOTA_BYTES": "1073741824",
     "MAX_UPLOAD_BYTES": "104857600",

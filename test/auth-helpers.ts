@@ -27,3 +27,31 @@ export function login(email: string, password: string): Promise<Response> {
 export async function setUserStatus(email: string, status: string): Promise<void> {
   await env.DB.prepare("UPDATE users SET status = ?1 WHERE email = ?2").bind(status, email).run();
 }
+
+interface UserRowOptions {
+  role?: string;
+  status?: string;
+  quotaBytes?: number;
+  usedBytes?: number;
+  createdAt?: number;
+}
+
+/** Insere um utilizador por SQL, sem passar pela API nem gastar o PBKDF2: para os testes que precisam de vários. Devolve o id. */
+export async function insertUser(email: string, options: UserRowOptions = {}): Promise<string> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO users (id, email, password_hash, role, status, quota_bytes, used_bytes, created_at)
+     VALUES (?1, ?2, 'x', ?3, ?4, ?5, ?6, ?7)`,
+  )
+    .bind(
+      id,
+      email,
+      options.role ?? "user",
+      options.status ?? "active",
+      options.quotaBytes ?? 1_000_000,
+      options.usedBytes ?? 0,
+      options.createdAt ?? 1,
+    )
+    .run();
+  return id;
+}
