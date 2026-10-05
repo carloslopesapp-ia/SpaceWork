@@ -14,43 +14,38 @@ export default function SearchPage() {
   const raw = params.get("q") ?? "";
   const { term, problem } = describeSearch(raw);
   const search = useSearch(raw);
+  const results = problem === null ? search.data : undefined;
 
-  let body;
-  if (term === "") {
-    body = <p className="mt-6 text-slate-500">Escreva o que procura na caixa de pesquisa.</p>;
-  } else if (problem !== null) {
-    body = <p className="mt-6 text-slate-500">{problem}</p>;
-  } else if (search.isPending) {
-    body = <p className="mt-6 text-slate-500">A pesquisar…</p>;
-  } else if (search.isError && search.data === undefined) {
-    body = (
-      <div className="mt-6 max-w-md space-y-4">
-        <Message kind="error">{errorMessage(search.error)}</Message>
-        <Button variant="secondary" onClick={() => void search.refetch()}>
-          Tentar novamente
-        </Button>
-      </div>
-    );
-  } else if (search.data.length === 0) {
-    body = <p className="mt-6 text-slate-500">Nenhum resultado para «{term}».</p>;
-  } else {
-    body = (
-      <>
-        {search.isError && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Message kind="error">{errorMessage(search.error)}</Message>
-            <Button variant="secondary" onClick={() => void search.refetch()}>
-              Tentar novamente
-            </Button>
-          </div>
-        )}
-        <p className="mt-2 text-sm text-slate-600">
-          {search.data.length >= MAX_RESULTS
-            ? `Mostram-se os primeiros ${MAX_RESULTS} resultados. Escreva mais para os afinar.`
-            : `${search.data.length} ${search.data.length === 1 ? "resultado" : "resultados"}`}
-        </p>
+  // Uma só linha de estado, sempre montada e com `role="status"`: o foco fica na caixa de pesquisa e os leitores de ecrã só anunciam
+  // o que muda dentro de uma região viva (uma linha nova a cada estado não seria anunciada).
+  let status = "";
+  if (term === "") status = "Escreva o que procura na caixa de pesquisa.";
+  else if (problem !== null) status = problem;
+  else if (results !== undefined) {
+    if (results.length === 0) status = `Nenhum resultado para «${term}».`;
+    else if (results.length >= MAX_RESULTS) status = `Mostram-se os primeiros ${MAX_RESULTS} resultados. Escreva mais para os afinar.`;
+    else status = `${results.length} ${results.length === 1 ? "resultado" : "resultados"}`;
+  } else if (search.isPending) status = "A pesquisar…";
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold tracking-tight break-words">
+        {problem === null ? `Resultados para «${term}»` : "Pesquisa"}
+      </h1>
+      <p role="status" className="mt-4 text-sm text-slate-600">
+        {status}
+      </p>
+      {problem === null && search.isError && (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Message kind="error">{errorMessage(search.error)}</Message>
+          <Button variant="secondary" onClick={() => void search.refetch()}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
+      {results !== undefined && results.length > 0 && (
         <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-          {search.data.map((result) =>
+          {results.map((result) =>
             result.kind === "folder" ? (
               <FolderRow key={`folder-${result.folder.id}`} folder={result.folder} path={result.path} />
             ) : (
@@ -58,16 +53,7 @@ export default function SearchPage() {
             ),
           )}
         </ul>
-      </>
-    );
-  }
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight break-words">
-        {problem === null ? `Resultados para «${term}»` : "Pesquisa"}
-      </h1>
-      {body}
+      )}
     </div>
   );
 }

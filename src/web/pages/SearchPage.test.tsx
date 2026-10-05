@@ -164,4 +164,23 @@ describe("pesquisa", () => {
     await waitFor(() => expect(screen.queryByText("praia.png")).not.toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Praias do Sul" })).toBeInTheDocument();
   });
+
+  it("o estado da pesquisa é anunciado numa só região viva que fica montada de «A pesquisar…» até aos resultados", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    serve([], {
+      "GET /api/search": async () => {
+        await gate;
+        return json({ results: [FILE_IN_FOTOS] });
+      },
+    });
+    renderApp("/pesquisa?q=praia");
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("A pesquisar…"));
+
+    release();
+
+    await waitFor(() => expect(status).toHaveTextContent("1 resultado"));
+    expect(screen.getByRole("status")).toBe(status); // o mesmo elemento: os leitores de ecrã anunciam a mudança
+  });
 });
