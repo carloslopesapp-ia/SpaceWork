@@ -28,6 +28,13 @@ export function Modal({ title, onClose, children, wide = false }: ModalProps) {
     return () => opener?.focus();
   }, [opener]);
 
+  // Se o elemento focado desaparece (por exemplo, a linha de um link revogado), o foco cai para o <body>, onde o Esc e o Tab já não
+  // chegam ao diálogo (tratam-se no `onKeyDown` do próprio diálogo): depois de cada renderização, devolve-se-lhe o foco se o perdeu.
+  useEffect(() => {
+    const dialog = dialogRef.current!;
+    if (!dialog.contains(document.activeElement)) dialog.focus();
+  });
+
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.stopPropagation();

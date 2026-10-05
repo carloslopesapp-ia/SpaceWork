@@ -19,6 +19,15 @@ function Harness() {
   );
 }
 
+function VanishingHarness() {
+  const [shown, setShown] = useState(true);
+  return (
+    <Modal title="Um título" onClose={() => undefined}>
+      {shown && <button onClick={() => setShown(false)}>Remover-me</button>}
+    </Modal>
+  );
+}
+
 async function openModal() {
   const user = userEvent.setup();
   render(<Harness />);
@@ -56,5 +65,13 @@ describe("Modal", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await user.click(screen.getByTestId("modal-backdrop"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("se o elemento focado desaparece, o foco volta ao diálogo (o Esc e o Tab continuam a funcionar)", async () => {
+    const user = userEvent.setup();
+    render(<VanishingHarness />);
+    await user.click(screen.getByRole("button", { name: "Remover-me" }));
+    expect(screen.queryByRole("button", { name: "Remover-me" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Um título" })).toHaveFocus();
   });
 });

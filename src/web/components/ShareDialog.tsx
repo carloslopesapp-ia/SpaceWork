@@ -59,7 +59,7 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
   }
 
   return (
-    <Modal title={`Partilhar «${file.name}»`} onClose={onClose}>
+    <Modal title={`Partilhar «${file.name}»`} onClose={() => !create.isPending && onClose()}>
       <div className="space-y-5">
         <p className="text-sm text-slate-700">Qualquer pessoa com o link pode descarregar este ficheiro, sem iniciar sessão.</p>
 
@@ -151,7 +151,7 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
         </section>
 
         <div className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={create.isPending} onClick={onClose}>
             Fechar
           </Button>
         </div>

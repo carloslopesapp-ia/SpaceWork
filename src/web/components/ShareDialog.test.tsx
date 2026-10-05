@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { FileItem, ShareItem } from "../../shared/types";
@@ -135,6 +135,49 @@ describe("ShareDialog", () => {
 
     expect(await screen.findByText("Ainda não há links ativos.")).toBeInTheDocument();
     expect(state.server.callsTo("DELETE /api/shares/:id")[0].params.id).toBe("s1");
+  });
+
+  it("depois de revogar com o teclado o foco continua no diálogo e o Esc fecha-o", async () => {
+    const state = setup([FOREVER], {
+      "DELETE /api/shares/:id": () => {
+        listed = [];
+        return noContent();
+      },
+    });
+    const revoke = await screen.findByRole("button", { name: "Revogar o link 1, criado a 03/10/2026" });
+    revoke.focus();
+    await state.user.keyboard("{Enter}");
+    expect(await screen.findByText("Ainda não há links ativos.")).toBeInTheDocument();
+
+    await state.user.keyboard("{Escape}");
+
+    expect(state.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("enquanto cria o link, Esc, o fundo e «Fechar» não fecham o diálogo (o endereço só aparece uma vez)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = setup([], {
+      "POST /api/files/:id/shares": async () => {
+        await gate;
+        listed = [FOREVER];
+        return json({ share: FOREVER, token: "tok-p" }, 201);
+      },
+    });
+    await state.user.click(await screen.findByRole("button", { name: "Criar link" }));
+    const dialog = screen.getByRole("dialog");
+    await within(dialog).findByRole("button", { name: "A criar…" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(state.onClose).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "Fechar" })).toBeDisabled();
+    release();
+    const created = within(await screen.findByRole("region", { name: "Link criado" }));
+    expect(created.getByLabelText("Link de partilha")).toHaveValue(`${window.location.origin}/s/tok-p`);
+    expect(within(dialog).getByRole("button", { name: "Fechar" })).toBeEnabled();
+    expect(state.onClose).not.toHaveBeenCalled();
   });
 
   it("revogar o link que acabou de ser criado esconde o endereço, que já não funciona", async () => {
