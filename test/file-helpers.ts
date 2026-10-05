@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { FileItem } from "../src/shared/types";
-import { api } from "./helpers";
+import { fetchWithEnv } from "./db-helpers";
+import { ORIGIN, api } from "./helpers";
 
 interface UploadOptions {
   folder?: string | null;
@@ -81,4 +82,28 @@ export async function insertFileRow(
     )
     .run();
   return id;
+}
+
+/**
+ * Faz um upload chamando a app diretamente com bindings/variáveis alterados (o resto vem de `env`). O Content-Length tem de ser posto
+ * à mão (`lengthHeader: null` omite-o).
+ */
+export function rawUpload(
+  name: string,
+  body: Uint8Array,
+  cookie: string,
+  override: Record<string, unknown>,
+  lengthHeader: string | null = String(body.length),
+): Promise<Response> {
+  const request = new Request(`${ORIGIN}/api/files?name=${name}`, {
+    method: "PUT",
+    body,
+    headers: {
+      Origin: ORIGIN,
+      Cookie: cookie,
+      "Content-Type": "application/octet-stream",
+      ...(lengthHeader === null ? {} : { "Content-Length": lengthHeader }),
+    },
+  });
+  return fetchWithEnv(request, override);
 }

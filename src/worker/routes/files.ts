@@ -43,7 +43,8 @@ function parseContentLength(raw: string | undefined): number {
  * 2. Grava os bytes no R2 em *stream* (o R2 exige o tamanho conhecido, por isso o Content-Length é obrigatório).
  * 3. Passa a linha a `ready`. Se o passo 2 ou 3 falhar, tenta libertar a reserva, mas só se a linha ainda
  *    estiver `pending` (apaga-a, devolve o espaço e só então apaga o objeto do R2). Se já está `ready`, o
- *    ficheiro existe e nada se desfaz (ver `releaseReservation`).
+ *    ficheiro existe e nada se desfaz (ver `releaseReservation`). Se a linha já nem existe (a manutenção limpou-a),
+ *    apaga o objeto e responde 409 `upload_expired`.
  */
 files.put("/", async (c) => {
   const db = c.env.DB;
@@ -104,7 +105,16 @@ files.put("/", async (c) => {
     if (object === null || object.size !== size) {
       throw new Error("O tamanho gravado no R2 é diferente do declarado.");
     }
-    await db.prepare("UPDATE files SET status = 'ready' WHERE id = ?1").bind(id).run();
+    const ready = await db
+      .prepare("UPDATE files SET status = 'ready' WHERE id = ?1 AND status = 'pending'")
+      .bind(id)
+      .run();
+    // Nenhuma linha passou a `ready`: a reserva foi limpa entretanto (a manutenção apaga os envios `pending` com mais de uma hora e as
+    // contas em remoção). O objeto que acabou de ser gravado ficou sem linha: apaga-se, e o envio falha em vez de dizer que correu bem.
+    if (ready.meta.changes !== 1) {
+      await c.env.FILES.delete(r2Key).catch((error) => console.error(`Objeto órfão no R2: ${r2Key}`, error));
+      throw new ApiError(409, "upload_expired", "O envio demorou demasiado e foi cancelado. Tente de novo.");
+    }
   } catch (error) {
     await releaseReservation(c.env, user.id, id, size, r2Key);
     throw error;

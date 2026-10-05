@@ -44,14 +44,14 @@ export async function deleteSessionByHash(db: D1Database, tokenHash: string): Pr
   await db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(tokenHash).run();
 }
 
-/** Apaga as sessões de um utilizador, exceto (opcionalmente) a indicada. */
-export async function deleteUserSessions(
+/**
+ * A instrução que apaga as sessões de um utilizador, exceto (opcionalmente) a indicada. Devolve-se a instrução, sem a executar, para
+ * se juntar a outras escritas na mesma `batch` (trocar a senha, suspender ou apagar uma conta): ou ficam todas, ou nenhuma.
+ */
+export function deleteUserSessionsStatement(
   db: D1Database,
   userId: string,
   exceptTokenHash = "",
-): Promise<void> {
-  await db
-    .prepare("DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2")
-    .bind(userId, exceptTokenHash)
-    .run();
+): D1PreparedStatement {
+  return db.prepare("DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2").bind(userId, exceptTokenHash);
 }

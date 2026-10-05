@@ -6,7 +6,7 @@ import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from "../lib/coo
 import { hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
 import { readJsonObject, readString } from "../lib/http";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
-import { createSession, deleteSessionByHash, deleteUserSessions } from "../lib/sessions";
+import { createSession, deleteSessionByHash, deleteUserSessionsStatement } from "../lib/sessions";
 import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
 import {
   isValidEmail,
@@ -146,10 +146,11 @@ auth.post("/password", requireAuth, async (c) => {
   }
 
   await clearFailures(db, user.email);
-  await db
-    .prepare("UPDATE users SET password_hash = ?1 WHERE id = ?2")
-    .bind(await hashPassword(newPassword), user.id)
-    .run();
-  await deleteUserSessions(db, user.id, c.get("sessionTokenHash"));
+  // A senha nova e o fim das outras sessões ficam ou não ficam juntos: com duas escritas, se a segunda falhasse,
+  // uma sessão roubada continuava viva com a senha já trocada.
+  await db.batch([
+    db.prepare("UPDATE users SET password_hash = ?1 WHERE id = ?2").bind(await hashPassword(newPassword), user.id),
+    deleteUserSessionsStatement(db, user.id, c.get("sessionTokenHash")),
+  ]);
   return c.body(null, 204);
 });

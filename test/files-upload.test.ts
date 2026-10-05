@@ -1,35 +1,13 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerUser } from "./auth-helpers";
-import { dbWithBatchHook, dbWithStatementHook, fetchWithEnv, silenceErrors } from "./db-helpers";
-import { countFiles, setQuota, uploadFile, uploadOk, usedBytes } from "./file-helpers";
+import { dbWithBatchHook, dbWithStatementHook, silenceErrors } from "./db-helpers";
+import { countFiles, rawUpload, setQuota, uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { createFolder, getContents } from "./folder-helpers";
-import { ORIGIN, api, resetState } from "./helpers";
+import { api, resetState } from "./helpers";
 
 beforeEach(resetState);
 afterEach(() => vi.restoreAllMocks());
-
-// Chama a app diretamente com bindings/variáveis alterados. Aqui o Content-Length tem de ser posto à mão
-// (`lengthHeader: null` omite-o).
-function rawUpload(
-  name: string,
-  body: Uint8Array,
-  cookie: string,
-  override: Record<string, unknown>,
-  lengthHeader: string | null = String(body.length),
-) {
-  const request = new Request(`${ORIGIN}/api/files?name=${name}`, {
-    method: "PUT",
-    body,
-    headers: {
-      Origin: ORIGIN,
-      Cookie: cookie,
-      "Content-Type": "application/octet-stream",
-      ...(lengthHeader === null ? {} : { "Content-Length": lengthHeader }),
-    },
-  });
-  return fetchWithEnv(request, override);
-}
 
 describe("PUT /api/files (upload)", () => {
   it("grava o ficheiro no R2 e na D1 e devolve-o", async () => {

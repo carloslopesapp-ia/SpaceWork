@@ -84,3 +84,21 @@ describe("esquema da D1", () => {
     expect(row?.n).toBe(0);
   });
 });
+
+describe("índices da manutenção (migração 0003)", () => {
+  const sqlOf = async (name: string): Promise<string | undefined> =>
+    (
+      await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1")
+        .bind(name)
+        .first<{ sql: string }>()
+    )?.sql;
+
+  it("existem, e os parciais só cobrem as linhas que a manutenção procura", async () => {
+    expect(await sqlOf("files_pending_created")).toMatch(/\(created_at\) WHERE status = 'pending'/);
+    expect(await sqlOf("files_trash_expiry")).toMatch(/\(deleted_at\) WHERE deleted_at IS NOT NULL/);
+    expect(await sqlOf("login_failures_failed_at")).toMatch(/\(failed_at\)/);
+    expect(await sqlOf("shares_revoked_at")).toMatch(/\(revoked_at\) WHERE revoked_at IS NOT NULL/);
+    expect(await sqlOf("shares_expires_at")).toMatch(/\(expires_at\) WHERE expires_at IS NOT NULL/);
+    expect(await sqlOf("users_deleting")).toMatch(/\(created_at\) WHERE status = 'deleting'/);
+  });
+});

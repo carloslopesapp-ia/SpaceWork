@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { login, registerUser } from "./auth-helpers";
-import { api, resetDb, sessionCookie } from "./helpers";
+import { dbWithBatchHook, fetchWithEnv } from "./db-helpers";
+import { api, buildRequest, resetDb, sessionCookie } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -61,5 +62,33 @@ describe("POST /api/auth/password", () => {
     for (let i = 0; i < 5; i++) await change(cookie, "errada-errada", "senha-nova-123");
     const res = await change(cookie, "senha-segura-123", "senha-nova-123");
     expect(res.status).toBe(429);
+  });
+});
+
+describe("POST /api/auth/password: atomicidade", () => {
+  it("troca a senha e termina as outras sessões numa só batch, e a sessão atual continua", async () => {
+    const { cookie } = await registerUser("ana@example.com", "senha-segura-123");
+    const otherCookie = sessionCookie(await login("ana@example.com", "senha-segura-123"));
+    expect(otherCookie).not.toBeNull();
+    const batches: number[] = [];
+    const db = dbWithBatchHook(async (call, runReal) => {
+      batches.push(call);
+      return runReal();
+    });
+
+    const res = await fetchWithEnv(
+      buildRequest("/api/auth/password", {
+        method: "POST",
+        cookie,
+        json: { currentPassword: "senha-segura-123", newPassword: "senha-nova-456" },
+      }),
+      { DB: db },
+    );
+
+    expect(res.status).toBe(204);
+    expect(batches).toEqual([1]); // uma só batch: as duas escritas ficam ou não ficam juntas
+    expect((await api("/api/auth/me", { cookie: otherCookie! })).status).toBe(401);
+    expect((await api("/api/auth/me", { cookie })).status).toBe(200);
+    expect((await login("ana@example.com", "senha-nova-456")).status).toBe(200);
   });
 });
