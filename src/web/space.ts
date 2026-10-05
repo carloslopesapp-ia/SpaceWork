@@ -9,6 +9,8 @@ const FOLDER = "folder";
 export const folderKey = (folderId: string | null) => [FOLDER, folderId ?? "root"] as const;
 export const TREE_KEY = ["tree"] as const;
 export const CONFIG_KEY = ["config"] as const;
+export const TRASH_KEY = ["trash"] as const;
+export const SEARCH_KEY = ["search"] as const;
 
 export function useContents(folderId: string | null) {
   return useQuery({
@@ -35,8 +37,8 @@ export function useConfig() {
 }
 
 /**
- * Depois de qualquer alteração ao espaço: as pastas listadas, a árvore do diálogo "Mover" e a quota usada
- * (barra lateral) ficam desatualizadas. Devolve a função que as invalida.
+ * Depois de qualquer alteração ao espaço: as pastas listadas, a árvore do diálogo "Mover", a quota usada (barra lateral),
+ * a lixeira e os resultados das pesquisas ficam desatualizados. Devolve a função que as invalida.
  */
 export function useRefreshSpace() {
   const queryClient = useQueryClient();
@@ -45,11 +47,13 @@ export function useRefreshSpace() {
       queryClient.invalidateQueries({ queryKey: [FOLDER] }),
       queryClient.invalidateQueries({ queryKey: TREE_KEY }),
       queryClient.invalidateQueries({ queryKey: ME_KEY }),
+      queryClient.invalidateQueries({ queryKey: TRASH_KEY }),
+      queryClient.invalidateQueries({ queryKey: SEARCH_KEY }),
     ]);
 }
 
 /** Mutação que atualiza o resto da interface quando termina, com êxito ou não (um erro pode vir de dados já velhos). */
-function useSpaceMutation<Variables, Data = void>(mutationFn: (variables: Variables) => Promise<Data>) {
+export function useSpaceMutation<Variables, Data = void>(mutationFn: (variables: Variables) => Promise<Data>) {
   const refresh = useRefreshSpace();
   return useMutation({ mutationFn, onSettled: () => refresh() });
 }
