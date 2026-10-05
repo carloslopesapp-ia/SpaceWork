@@ -6,9 +6,24 @@ import { Button } from "./Button";
 
 export const SEARCH_PATH = "/pesquisa";
 
-function SearchForm({ initial }: { initial: string }) {
+/**
+ * A caixa de pesquisa da barra lateral: Enter (ou «Pesquisar») leva a `/pesquisa?q=...`. Na página da pesquisa mostra o texto
+ * pesquisado; quando o texto pesquisado muda (outra pesquisa, o botão «Voltar», sair da página da pesquisa) o campo acompanha-o.
+ * O campo nunca é remontado, por isso mantém o foco depois de pesquisar.
+ */
+export function SearchBox() {
+  const { pathname } = useLocation();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const [text, setText] = useState(initial);
+  const searched = pathname === SEARCH_PATH ? (params.get("q") ?? "") : "";
+  const [text, setText] = useState(searched);
+  // Acompanha o texto pesquisado ajustando o estado durante a renderização. Uma `key` no formulário fazia o mesmo, mas remontava o
+  // campo e tirava-lhe o foco a cada pesquisa.
+  const [followed, setFollowed] = useState(searched);
+  if (followed !== searched) {
+    setFollowed(searched);
+    setText(searched);
+  }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -32,15 +47,4 @@ function SearchForm({ initial }: { initial: string }) {
       </Button>
     </form>
   );
-}
-
-/**
- * A caixa de pesquisa da barra lateral: Enter (ou «Pesquisar») leva a `/pesquisa?q=...`. Na página da pesquisa mostra o texto
- * pesquisado; ao ir para outra página limpa-se (a `key` recomeça o formulário sempre que o texto pesquisado muda).
- */
-export function SearchBox() {
-  const { pathname } = useLocation();
-  const [params] = useSearchParams();
-  const searched = pathname === SEARCH_PATH ? (params.get("q") ?? "") : "";
-  return <SearchForm key={searched} initial={searched} />;
 }

@@ -43,7 +43,8 @@ describe("pesquisa", () => {
     renderApp("/");
     await screen.findByRole("heading", { name: "Meu espaço" });
 
-    await user.type(box(), "  praia {Enter}");
+    const input = box();
+    await user.type(input, "  praia {Enter}");
 
     expect(await screen.findByRole("heading", { name: "Resultados para «praia»" })).toBeInTheDocument();
     expect(server.calls.find((call) => call.path === "/api/search")?.query.get("q")).toBe("praia");
@@ -54,6 +55,8 @@ describe("pesquisa", () => {
     expect(within(rows[1]).getByRole("link", { name: "Em Meu espaço" })).toHaveAttribute("href", "/");
     expect(within(rows[2]).getByRole("link", { name: "Em Meu espaço / Documentos / Contas" })).toHaveAttribute("href", "/pasta/c1");
     expect(box()).toHaveValue("praia");
+    expect(box()).toBe(input); // o campo não foi remontado...
+    expect(input).toHaveFocus(); // ...por isso o teclado continua nele
   });
 
   it("abrir /pesquisa?q=... diretamente pesquisa e mostra o texto na caixa", async () => {
@@ -61,6 +64,22 @@ describe("pesquisa", () => {
     renderApp("/pesquisa?q=praia");
     expect(await screen.findByText("1 resultado")).toBeInTheDocument();
     expect(box()).toHaveValue("praia");
+  });
+
+  it("pesquisar outra vez, a partir da página da pesquisa, mantém o campo e o foco", async () => {
+    serve();
+    const user = userEvent.setup();
+    renderApp("/pesquisa?q=praia");
+    await screen.findByText("3 resultados");
+    const input = box();
+
+    await user.clear(input);
+    await user.type(input, "casa{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "Resultados para «casa»" })).toBeInTheDocument();
+    expect(box()).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("casa");
   });
 
   it("um texto curto não pede nada à API e diz o que falta; um vazio pede para escrever", async () => {
