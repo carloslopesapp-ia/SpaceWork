@@ -159,9 +159,9 @@ Todas as rotas autenticadas exigem sessão, exceto as de registo, login e as pú
 | Partilha | `POST /api/files/:id/shares`, `GET /api/files/:id/shares`, `DELETE /api/shares/:id` |
 | Público | `GET /api/public/shares/:token` (nome e tamanho), `GET /api/public/shares/:token/download` |
 | Pesquisa | `GET /api/search?q=` |
-| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/:id` (`quota_bytes` e/ou `status` entre `active` e `suspended`), `DELETE /api/admin/users/:id` |
+| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/:id` (`quotaBytes`, inteiro de bytes entre 0 e 2^50, e/ou `status` entre `active` e `suspended`; na API os campos são em *camelCase*, e `quota_bytes` é a coluna da D1), `DELETE /api/admin/users/:id` |
 
-Regras do admin: só `role = admin` acede a `/api/admin/*`. Contas com `role = admin` não podem ser suspensas nem apagadas através da API. Apagar um utilizador define `status = deleting` e termina as sessões dele. A remoção dos ficheiros e das linhas é feita pelo cron.
+Regras do admin: só `role = admin` acede a `/api/admin/*`. Contas com `role = admin` não podem ser suspensas nem apagadas através da API. Suspender também termina as sessões (ao reativar, as antigas não voltam a valer). Numa conta de admin só a quota se pode mudar (403 `admin_protected` para o resto), e uma conta em remoção já não se altera (409 `account_deleting`). Baixar a quota abaixo do que a conta já usa só impede novos uploads. Apagar um utilizador define `status = deleting` e termina as sessões dele, e é idempotente. A remoção dos ficheiros e das linhas é feita pelo cron (secção 7); **até lá o email continua ocupado**: registar-se com ele dá 409.
 
 ## 7. Cron de manutenção (hora a hora)
 
@@ -169,8 +169,10 @@ Cada execução é idempotente e trabalha em lotes limitados, para respeitar os 
 
 1. Itens na lixeira há mais de `TRASH_RETENTION_DAYS`: apagar do R2 e da D1, descontar quota.
 2. Ficheiros `pending` com mais de 1 hora: apagar linha, apagar chave no R2 (melhor esforço), libertar quota.
-3. Utilizadores `deleting`: apagar os ficheiros do R2 (até 1000 chaves por chamada), depois as linhas de ficheiros, pastas, sessões e partilhas, e por fim o utilizador.
+3. Utilizadores `deleting` (no máximo 2 por execução): apagar os objetos do R2 pelo prefixo `u/{userId}/` (páginas de 1000 chaves, no máximo 2 páginas por conta e por execução; apanha também os órfãos), e só quando o prefixo fica vazio apagar, numa só *batch*, as linhas de partilhas, ficheiros, pastas, sessões e, por fim, o utilizador. Uma conta grande leva várias execuções.
 4. Limpar sessões expiradas, `login_failures` com mais de 1 dia e partilhas expiradas ou revogadas há mais de 30 dias.
+
+Orçamento de subpedidos por execução, no pior caso: lixeira 13 (até 300 ficheiros), `pending` 7 (até 150), contas em remoção 11 e limpeza 1, ou seja, 32 dos 50 do plano gratuito. Cada passo falha sozinho (os outros correm na mesma) e a execução acaba com erro se algum falhou.
 
 ## 8. Interface (React, português europeu, responsiva)
 
@@ -236,4 +238,4 @@ Recuperação de senha por email (e, por isso, o admin **não** consegue repor a
 
 1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. Não é medível em local. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês). O valor de 100 000 como teto de iterações do WebCrypto do Workers também só se confirma em produção.
 2. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
-3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação).
+3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação; o desenho do Plano 4 gasta 32 no pior caso: confirmar em produção que a contagem é a esperada e que o gatilho de hora a hora corre).

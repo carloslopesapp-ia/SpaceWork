@@ -75,7 +75,7 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`), exceto as du
 | `DELETE /api/files/:id` | Manda o ficheiro para a lixeira |
 | `GET /api/config` | Limites do servidor para o browser: `{ maxUploadBytes }` |
 | `GET /api/search?q=` | Pesquisa por nome nas pastas e nos ficheiros (sem distinguir maiúsculas nem acentos; 2 a 100 caracteres; até 50 resultados, cada um com o caminho da pasta onde está) |
-| `GET /api/trash` | A lixeira: até 200 ficheiros excluídos, os mais recentes primeiro, com a pasta onde estavam e a data da eliminação automática (`purgeAt`; o cron que a aplica chega no Plano 4); `total` conta todos |
+| `GET /api/trash` | A lixeira: até 200 ficheiros excluídos, os mais recentes primeiro, com a pasta onde estavam e a data da eliminação automática (`purgeAt`; é o cron de manutenção que a aplica); `total` conta todos |
 | `POST /api/trash/:id/restore` | Restaura um ficheiro; se o nome estiver ocupado tenta no máximo 10 nomes (o original e « (restaurado)» até « (restaurado 9)») e depois responde 409 `name_taken`; se a pasta original já não existir, o ficheiro volta para a raiz |
 | `DELETE /api/trash/:id` | Elimina um ficheiro de vez (apaga o objeto do R2 e devolve o espaço) |
 | `DELETE /api/trash` | Esvazia a lixeira por blocos de 50 e responde `{ purged, remaining }`: repetir até `remaining` ser 0 |
@@ -84,8 +84,13 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`), exceto as du
 | `DELETE /api/shares/:id` | Revoga um link |
 | `GET /api/public/shares/:token` | Público: nome e tamanho do ficheiro partilhado |
 | `GET /api/public/shares/:token/download` | Público: descarrega o ficheiro partilhado (sempre como anexo) |
+| `GET /api/admin/users` | Só admin: as contas (`id`, `email`, `role`, `status`, `quotaBytes`, `usedBytes`, `createdAt`), da mais antiga para a mais recente, incluindo as que estão a ser removidas |
+| `PATCH /api/admin/users/:id` | Só admin: `{ quotaBytes?, status? }`. `quotaBytes` é um inteiro de bytes entre 0 e 2^50; `status` é `active` ou `suspended` (suspender termina as sessões da conta). Numa conta de admin só a quota muda (403 `admin_protected`); uma conta em remoção não se altera (409 `account_deleting`) |
+| `DELETE /api/admin/users/:id` | Só admin: marca a conta para remoção (`deleting`) e termina as sessões; a remoção é do cron. Responde 204, também se a conta já estava em remoção; uma conta de admin não se apaga (403 `admin_protected`) |
 
 Um link só funciona se não foi revogado nem expirou, o ficheiro está fora da lixeira e a conta do dono está ativa; nos outros casos a resposta é sempre `404 share_not_found`, sem dizer porquê.
+
+As rotas `/api/admin/*` exigem também `role = admin` (senão 403 `forbidden`) e só gerem contas e quotas: **não há nenhuma rota para ver ou descarregar os ficheiros de outros utilizadores**, e o admin não consegue repor a senha de ninguém.
 
 ## Interface
 
@@ -93,10 +98,35 @@ Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostr
 
 A **caixa de pesquisa** está na barra lateral de todas as páginas: Enter leva a `/pesquisa?q=...`, que lista as pastas e os ficheiros que têm o texto no nome (2 a 100 caracteres, até 50 resultados), cada um com a pasta onde está e com as mesmas ações das linhas de «Meu espaço». O endereço da pesquisa pode ser guardado ou copiado.
 
-**Lixeira** (`/lixeira`): lista os ficheiros excluídos (os 200 mais recentes) com a pasta onde estavam, o tamanho e as datas de exclusão e de eliminação automática (o cron que a aplica chega no Plano 4). «Restaurar» devolve o ficheiro à pasta de origem (ou à raiz) e diz com que nome ficou; «Eliminar de vez» e «Esvaziar lixeira» pedem confirmação, e esvaziar vai mostrando o progresso. Os ficheiros excluídos continuam a ocupar quota até serem eliminados de vez.
+**Lixeira** (`/lixeira`): lista os ficheiros excluídos (os 200 mais recentes) com a pasta onde estavam, o tamanho e as datas de exclusão e de eliminação automática (30 dias depois, por defeito, `TRASH_RETENTION_DAYS`; é o cron de manutenção que a aplica). «Restaurar» devolve o ficheiro à pasta de origem (ou à raiz) e diz com que nome ficou; «Eliminar de vez» e «Esvaziar lixeira» pedem confirmação, e esvaziar vai mostrando o progresso. Os ficheiros excluídos continuam a ocupar quota até serem eliminados de vez.
 
 **Partilhar**: «Partilhar…» no menu de um ficheiro abre um diálogo para criar links (sem validade, 1, 7 ou 30 dias), copiar o link, ver os links ativos e revogá-los. **O link completo só se vê logo a seguir a criá-lo** (o servidor guarda só o hash do token); depois só se vê a data de criação e a validade. Quem recebe o link abre `/s/<token>` sem iniciar sessão, vê o nome e o tamanho e descarrega o ficheiro; um link revogado, expirado ou de um ficheiro excluído mostra sempre o mesmo aviso. A página não carrega recursos de outras origens.
 
 **Sair** com envios em curso pede confirmação (sair cancela-os). Quando vários envios terminam, as listagens e a quota atualizam-se uma vez por meio segundo, e não uma vez por ficheiro.
+
+**Administração** (`/admin`, só para o master; a quem não é admin o endereço leva a «Meu espaço» e a ligação «Admin» nem aparece na barra lateral): a tabela das contas, com o email, o espaço usado e a quota, o estado (Ativa, Suspensa ou A remover) e a data de criação. O menu «⋮» de cada conta tem:
+
+- «Alterar quota…», em GB (aceita vírgula ou ponto; de 0 a 1 048 576 GB). Baixar a quota abaixo do que a conta já usa não apaga nada: só impede novos envios.
+- «Suspender…» (pede confirmação): termina as sessões da conta e impede-a de entrar até ser reativada; os ficheiros ficam como estão e os links de partilha deixam de funcionar enquanto a conta estiver suspensa. «Reativar» não pede confirmação; a conta tem de entrar de novo.
+- «Apagar conta…» (pede confirmação, não se pode desfazer): a conta passa a «A remover» e o cron elimina os ficheiros, as pastas e os links na manutenção seguinte.
+
+As contas de administrador só têm a quota, e uma conta «A remover» não tem menu.
+
+## Manutenção
+
+Um cron (`0 * * * *`, de hora a hora, em `wrangler.jsonc`) corre `src/worker/cron.ts`. Cada execução trabalha em lotes limitados, para caber nos 50 subpedidos por invocação do plano gratuito do Workers (no pior caso gasta 32), e cada passo falha sozinho: se um falha, os outros correm na mesma e a execução termina com erro (fica visível no painel da Cloudflare).
+
+1. **Lixeira:** elimina de vez os ficheiros excluídos há mais de `TRASH_RETENTION_DAYS` dias (até 300 por execução): apaga os objetos do R2 e as linhas da D1 e devolve o espaço.
+2. **Envios pendentes:** limpa os envios que ficaram a meio há mais de 1 hora (até 150 por execução) e devolve a quota que tinham reservado.
+3. **Contas em remoção:** até 2 contas por execução. Apaga os objetos do R2 pelo prefixo `u/<id>/` (até 2000 por conta e por execução: uma conta maior leva mais horas) e, só quando não resta nenhum, as linhas da D1 (partilhas, ficheiros, pastas, sessões e a conta). **Até isso acontecer o email continua ocupado:** registar-se com ele dá 409.
+4. **Limpeza:** as sessões expiradas, as falhas de login com mais de 1 dia e os links revogados ou expirados há mais de 30 dias.
+
+Para correr a manutenção à mão com `npm run dev` (D1 e R2 locais):
+
+```bash
+curl -X POST "http://localhost:5173/cdn-cgi/local/explorer/api/local/scheduled?worker=spacework" -H "Content-Type: application/json" -d '{"cron":"0 * * * *"}'
+```
+
+Em produção os erros de cada execução ficam nos registos do Worker (`wrangler tail` ou o painel da Cloudflare).
 
 Não fazer `git push` sem confirmação do dono do projeto.
