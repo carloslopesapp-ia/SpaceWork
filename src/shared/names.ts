@@ -2,6 +2,10 @@
 
 export const NAME_MAX_LENGTH = 255;
 
+/** Comprimento (em caracteres, depois de tirar espaços e acentos) que uma pesquisa por nome pode ter: a API e a caixa de pesquisa usam os mesmos limites. */
+export const SEARCH_MIN_LENGTH = 2;
+export const SEARCH_MAX_LENGTH = 100;
+
 /** Normaliza um nome vindo do utilizador: Unicode NFC e sem espaços nas pontas. */
 export function normalizeName(raw: string): string {
   return raw.normalize("NFC").trim();

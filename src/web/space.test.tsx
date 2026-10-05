@@ -3,7 +3,16 @@ import { act } from "react";
 import { describe, expect, it } from "vitest";
 import type { FolderContents } from "../shared/types";
 import { useMe } from "./auth";
-import { useConfig, useContents, useCreateFolder, useDeleteFile, useTree, useUpdateFolder } from "./space";
+import {
+  useConfig,
+  useContents,
+  useCreateFolder,
+  useDeleteFile,
+  useDeleteFolder,
+  useTree,
+  useUpdateFile,
+  useUpdateFolder,
+} from "./space";
 import { apiError, json, ME, mockApi, noContent } from "./test/mock-api";
 import { queryWrapper, testQueryClient } from "./test/render";
 
@@ -89,5 +98,34 @@ describe("mutações", () => {
     const { result } = renderHook(() => useDeleteFile(), { wrapper: queryWrapper(testQueryClient()) });
     await act(() => result.current.mutateAsync("a b"));
     expect(server.calls[0]).toMatchObject({ method: "DELETE", path: "/api/files/a%20b" });
+  });
+
+  it("excluir uma pasta usa DELETE e o id codificado, e atualiza a listagem", async () => {
+    const server = mockApi({
+      "GET /api/folders/:id/contents": () => json(EMPTY),
+      "DELETE /api/folders/:id": () => noContent(),
+    });
+    const wrapper = queryWrapper(testQueryClient());
+    const contents = renderHook(() => useContents(null), { wrapper });
+    const remove = renderHook(() => useDeleteFolder(), { wrapper });
+    await waitFor(() => expect(contents.result.current.isSuccess).toBe(true));
+
+    await act(() => remove.result.current.mutateAsync("a b"));
+
+    expect(server.callsTo("DELETE /api/folders/:id")[0]).toMatchObject({ method: "DELETE", path: "/api/folders/a%20b" });
+    await waitFor(() => expect(server.callsTo("GET /api/folders/:id/contents")).toHaveLength(2));
+  });
+
+  it("atualizar um ficheiro envia só o que mudou (o nome ou a pasta, com `null` a querer dizer a raiz) para o id codificado", async () => {
+    const file = { id: "a b", name: "novo.txt", folderId: null, size: 1, mime: "text/plain", createdAt: 1 };
+    const server = mockApi({ "PATCH /api/files/:id": () => json({ file }) });
+    const { result } = renderHook(() => useUpdateFile(), { wrapper: queryWrapper(testQueryClient()) });
+
+    await act(() => result.current.mutateAsync({ id: "a b", name: "novo.txt" }));
+    await act(() => result.current.mutateAsync({ id: "a b", folderId: null }));
+
+    const [rename, move] = server.callsTo("PATCH /api/files/:id");
+    expect(rename).toMatchObject({ path: "/api/files/a%20b", body: { name: "novo.txt" } });
+    expect(move.body).toEqual({ folderId: null });
   });
 });

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { SEARCH_MAX_LENGTH, SEARCH_MIN_LENGTH } from "../src/shared/names";
 import type { SearchResult } from "../src/shared/types";
 import { registerUser } from "./auth-helpers";
 import { dbCountingPrepares, fetchWithEnv } from "./db-helpers";
@@ -133,5 +134,15 @@ describe("GET /api/search", () => {
     const searchQueries = sql.filter((query) => query.includes("SELECT") && query.includes("files"));
     expect(searchQueries).toHaveLength(1);
     expect(searchQueries[0]).not.toContain("LIKE");
+  });
+});
+
+describe("GET /api/search: limites do comprimento", () => {
+  it("aceita pesquisas com SEARCH_MIN_LENGTH e SEARCH_MAX_LENGTH caracteres e recusa uma a menos e uma a mais", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    expect((await search(cookie, "a".repeat(SEARCH_MIN_LENGTH))).status).toBe(200);
+    expect((await search(cookie, "a".repeat(SEARCH_MIN_LENGTH - 1))).status).toBe(400);
+    expect((await search(cookie, "a".repeat(SEARCH_MAX_LENGTH))).status).toBe(200);
+    expect((await search(cookie, "a".repeat(SEARCH_MAX_LENGTH + 1))).status).toBe(400);
   });
 });

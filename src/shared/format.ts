@@ -15,7 +15,8 @@ export function formatBytes(bytes: number): string {
   return unit === 0 ? `${Math.round(value)} B` : `${numberFormat.format(value)} ${UNITS[unit]}`;
 }
 
-/** Data legível (ex.: "03/10/2026") a partir de milissegundos Unix, no fuso do utilizador. */
+/** Data legível (ex.: "03/10/2026") a partir de milissegundos Unix, no fuso do utilizador; "—" se o valor não for uma data. */
 export function formatDate(timestamp: number): string {
-  return dateFormat.format(timestamp);
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "—" : dateFormat.format(date);
 }

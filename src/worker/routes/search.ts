@@ -1,4 +1,4 @@
-import { normalizeName, searchKey } from "../../shared/names";
+import { normalizeName, SEARCH_MAX_LENGTH, SEARCH_MIN_LENGTH, searchKey } from "../../shared/names";
 import type { SearchResult } from "../../shared/types";
 import { ApiError } from "../errors";
 import { pathsForFolders, trailOf } from "../lib/paths";
@@ -6,8 +6,6 @@ import { createAuthedRouter } from "./authed";
 
 export const search = createAuthedRouter();
 
-const MIN_QUERY_LENGTH = 2;
-const MAX_QUERY_LENGTH = 100;
 const MAX_RESULTS = 50;
 
 interface SearchRow {
@@ -32,12 +30,12 @@ search.get("/", async (c) => {
   const db = c.env.DB;
   const userId = c.get("user").id;
   const query = normalizeName(c.req.query("q") ?? "");
-  if (query.length > MAX_QUERY_LENGTH) {
-    throw new ApiError(400, "query_too_long", `A pesquisa não pode ter mais de ${MAX_QUERY_LENGTH} caracteres.`);
+  if (query.length > SEARCH_MAX_LENGTH) {
+    throw new ApiError(400, "query_too_long", `A pesquisa não pode ter mais de ${SEARCH_MAX_LENGTH} caracteres.`);
   }
   const key = searchKey(query);
-  if ([...key].length < MIN_QUERY_LENGTH) {
-    throw new ApiError(400, "query_too_short", `Escreva pelo menos ${MIN_QUERY_LENGTH} caracteres.`);
+  if ([...key].length < SEARCH_MIN_LENGTH) {
+    throw new ApiError(400, "query_too_short", `Escreva pelo menos ${SEARCH_MIN_LENGTH} caracteres.`);
   }
 
   const { results: rows } = await db

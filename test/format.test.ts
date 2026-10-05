@@ -33,4 +33,10 @@ describe("formatDate", () => {
     expect(formatDate(new Date(2026, 9, 3, 12).getTime())).toBe("03/10/2026");
     expect(formatDate(new Date(2027, 0, 5, 23, 59).getTime())).toBe("05/01/2027");
   });
+
+  it("mostra um traço quando o valor não é uma data (NaN, infinito ou fora do intervalo do JavaScript)", () => {
+    expect(formatDate(Number.NaN)).toBe("—");
+    expect(formatDate(Number.POSITIVE_INFINITY)).toBe("—");
+    expect(formatDate(8.64e15 + 1)).toBe("—");
+  });
 });
