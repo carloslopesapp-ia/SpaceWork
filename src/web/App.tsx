@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router";
 import AppLayout from "./components/AppLayout";
 import AccountPage from "./pages/AccountPage";
+import AdminPage from "./pages/AdminPage";
 import FolderPage from "./pages/FolderPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="pesquisa" element={<SearchPage />} />
         <Route path="lixeira" element={<TrashPage />} />
         <Route path="conta" element={<AccountPage />} />
+        <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

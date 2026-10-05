@@ -114,6 +114,11 @@ export default function AppLayout() {
             <NavLink to="/conta" className={navClass}>
               Conta
             </NavLink>
+            {user.role === "admin" && (
+              <NavLink to="/admin" className={navClass}>
+                Admin
+              </NavLink>
+            )}
           </nav>
           <div className="space-y-4 md:mt-auto">
             <UsageBar usedBytes={user.usedBytes} quotaBytes={user.quotaBytes} />
