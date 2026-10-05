@@ -5,6 +5,7 @@ import FolderPage from "./pages/FolderPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
+import SharePage from "./pages/SharePage";
 import TrashPage from "./pages/TrashPage";
 
 /**
@@ -20,6 +21,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/registo" element={<RegisterPage />} />
+      <Route path="/s/:token" element={<SharePage />} />
       <Route element={<AppLayout />}>
         <Route index element={<FolderRoute />} />
         <Route path="pasta/:folderId" element={<FolderRoute />} />

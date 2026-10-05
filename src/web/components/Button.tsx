@@ -12,6 +12,11 @@ const VARIANTS = {
   danger: "bg-red-600 text-white hover:bg-red-500",
 };
 
+/** As classes de um botão, para uma ligação (`<a>`) com o aspeto de botão. */
+export function buttonClass(variant: NonNullable<ButtonProps["variant"]> = "primary", className = ""): string {
+  return `${BASE} ${VARIANTS[variant]} ${className}`;
+}
+
 export function Button({ variant = "primary", type = "button", className = "", ...props }: ButtonProps) {
-  return <button type={type} className={`${BASE} ${VARIANTS[variant]} ${className}`} {...props} />;
+  return <button type={type} className={buttonClass(variant, className)} {...props} />;
 }
