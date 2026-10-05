@@ -9,7 +9,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 2B | [Interface "Meu espaço"](2026-10-03-02b-interface-meu-espaco.md) | Lista, caminho (*breadcrumb*), nova pasta, upload com progresso (3 em paralelo), menu de ações, mover, pré-visualização de imagens e PDF; API: `GET /api/config`, limite de 100 níveis nas pastas | Concluído |
 | 3A | [API da lixeira, pesquisa e partilha](2026-10-03-03a-api-lixeira-pesquisa-partilha.md) | Lixeira (listar, restaurar com sufixo, eliminar de vez, esvaziar), pesquisa por nome com o caminho de cada resultado, links de partilha (criar com validade, listar, revogar) e as rotas públicas de nome, tamanho e descarregamento | Concluído |
 | 3B | [Interface da lixeira, pesquisa e partilha](2026-10-03-03b-interface-lixeira-pesquisa-partilha.md) | Ecrã `/lixeira` (restaurar, eliminar de vez, esvaziar), caixa de pesquisa com os resultados e o caminho de cada um, diálogo «Partilhar» (criar links com validade, copiar, revogar), página pública `/s/:token`; fila de envios com um refresh agrupado e aviso ao sair | Concluído |
-| 4 | Admin e manutenção | Painel de utilizadores e quotas, remoção de contas, cron de limpeza | Por escrever |
+| 4 | [Admin e manutenção](2026-10-05-04-admin-e-manutencao.md) | API e painel de utilizadores (quotas, suspender e reativar, apagar contas) e o cron de manutenção por hora (lixeira expirada, envios pendentes, contas em remoção, sessões, falhas de login e partilhas velhas) | Escrito, por executar |
 | 5 | Deploy e testes de ponta a ponta | Recursos na Cloudflare, `wrangler deploy`, teste Playwright de fumo, medição de CPU do PBKDF2 | Por escrever |
 
 ## Factos verificados que os planos seguintes devem respeitar
