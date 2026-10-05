@@ -153,7 +153,7 @@ describe("TrashPage: eliminar de vez", () => {
     const user = userEvent.setup();
     renderApp("/lixeira");
     expect(await screen.findByText("1,5 KB de 1 GB")).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     const dialog = screen.getByRole("dialog", { name: "Eliminar de vez" });
     expect(dialog).toHaveTextContent("Eliminar «relatório.pdf» de vez? Não se pode desfazer e o espaço é libertado.");
     expect(screen.getByRole("button", { name: "Cancelar" })).toHaveFocus();
@@ -170,7 +170,7 @@ describe("TrashPage: eliminar de vez", () => {
     const state = serve(trashOf([OLD]), { "DELETE /api/trash/:id": () => noContent() });
     const user = userEvent.setup();
     renderApp("/lixeira");
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     await user.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(state.server.callsTo("DELETE /api/trash/:id")).toHaveLength(0);
@@ -182,7 +182,7 @@ describe("TrashPage: eliminar de vez", () => {
     });
     const user = userEvent.setup();
     renderApp("/lixeira");
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Eliminar de vez" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Ficheiro não encontrado na lixeira.");
     expect(screen.getByRole("dialog", { name: "Eliminar de vez" })).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("TrashPage: eliminar de vez", () => {
     });
     const user = userEvent.setup();
     renderApp("/lixeira");
-    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    await user.click(await screen.findByRole("button", { name: "Eliminar de vez relatório.pdf" }));
     const dialog = screen.getByRole("dialog", { name: "Eliminar de vez" });
     await user.click(within(dialog).getByRole("button", { name: "Eliminar de vez" }));
     await within(dialog).findByRole("button", { name: "A eliminar…" });

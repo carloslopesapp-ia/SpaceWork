@@ -34,7 +34,12 @@ function LogoutButton() {
         variant="secondary"
         className="w-full"
         disabled={logout.isPending}
-        onClick={() => (busy ? setConfirming(true) : logout.mutate())}
+        onClick={() => {
+          if (busy) {
+            logout.reset(); // um erro de uma tentativa antiga não pode aparecer num diálogo que ainda ninguém confirmou
+            setConfirming(true);
+          } else logout.mutate();
+        }}
       >
         Sair
       </Button>

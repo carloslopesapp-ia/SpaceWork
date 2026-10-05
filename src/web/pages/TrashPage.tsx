@@ -47,7 +47,7 @@ function TrashRow({
         <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Restaurar ${item.name}`} onClick={onRestore}>
           {restoring ? "A restaurar…" : "Restaurar"}
         </Button>
-        <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Eliminar ${item.name} de vez`} onClick={onPurge}>
+        <Button variant="secondary" className="px-3 py-1.5" disabled={disabled} aria-label={`Eliminar de vez ${item.name}`} onClick={onPurge}>
           Eliminar de vez
         </Button>
       </span>
@@ -171,7 +171,7 @@ export default function TrashPage() {
           pending={purge.isPending}
           error={purge.error ? errorMessage(purge.error) : null}
           onConfirm={() => purge.mutate(purging.id, { onSuccess: closePurge })}
-          onClose={() => !purge.isPending && closePurge()}
+          onClose={closePurge}
         />
       )}
       {emptying && (
@@ -187,7 +187,7 @@ export default function TrashPage() {
           pending={empty.isPending}
           error={emptyError}
           onConfirm={() => empty.mutate(undefined, { onSuccess: (result) => result.remaining === 0 && closeEmpty() })}
-          onClose={() => !empty.isPending && closeEmpty()}
+          onClose={closeEmpty}
         />
       )}
     </div>

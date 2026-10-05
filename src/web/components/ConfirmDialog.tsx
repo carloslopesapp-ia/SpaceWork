@@ -26,7 +26,7 @@ export function ConfirmDialog({
   onClose,
 }: ConfirmDialogProps) {
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} onClose={() => !pending && onClose()}>
       <div className="space-y-4">
         <p className="text-sm text-slate-700">{message}</p>
         {error && <Message kind="error">{error}</Message>}

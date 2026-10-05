@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -51,5 +51,18 @@ describe("ConfirmDialog", () => {
   it("enquanto a ação decorre, «Cancelar» está desativado (não a pode parar)", () => {
     setup({ pending: true });
     expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
+  });
+
+  it("enquanto a ação decorre, Esc e o fundo não fecham o diálogo", () => {
+    const { onClose } = setup({ pending: true });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("quando não decorre nada, Esc fecha o diálogo", () => {
+    const { onClose } = setup();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

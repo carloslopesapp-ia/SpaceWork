@@ -64,6 +64,7 @@ describe("ShareDialog", () => {
     expect(created.getByLabelText("Link de partilha")).toHaveValue(`${window.location.origin}/s/tok-123`);
     expect(created.getByText(/não voltará a ser mostrado/)).toBeInTheDocument();
     expect(created.getByText(/sem validade/)).toBeInTheDocument();
+    expect(created.getByLabelText("Link de partilha")).toHaveFocus();
     expect(state.server.callsTo("POST /api/files/:id/shares")[0]).toMatchObject({ params: { id: "a1" }, body: {} });
     expect(await screen.findByText("Link 1: criado a 03/10/2026, sem validade")).toBeInTheDocument(); // a lista atualizou-se
   });
@@ -113,6 +114,7 @@ describe("ShareDialog", () => {
     const field = screen.getByLabelText("Link de partilha") as HTMLInputElement;
     expect(field.selectionStart).toBe(0);
     expect(field.selectionEnd).toBe(field.value.length);
+    expect(field).toHaveFocus();
   });
 
   it("o erro de links a mais (409) mostra a mensagem da API e não cria nada", async () => {

@@ -223,6 +223,26 @@ describe("AppLayout: «Sair» com envios em curso", () => {
     expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
   });
 
+  it("um erro antigo de «Sair» não aparece no diálogo quando ele se abre", async () => {
+    stubXhr();
+    mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": () => json({ user: ME }),
+      "GET /api/config": () => json({ maxUploadBytes: 1_000_000 }),
+      "POST /api/auth/logout": () => apiError(500, "internal_error", "Erro interno do servidor."),
+    });
+    const user = userEvent.setup();
+    renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Sair" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
+    await startUpload(user);
+
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Sair com envios em curso" });
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("sem envios, «Sair» não pergunta nada", async () => {
     const server = serveSession();
     const user = userEvent.setup();

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDate } from "../../shared/format";
 import type { FileItem } from "../../shared/types";
 import { errorMessage } from "../api";
@@ -39,6 +39,12 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
   const [copy, setCopy] = useState<"copied" | "failed" | null>(null);
   const linkField = useRef<HTMLInputElement>(null);
 
+  // Depois de criar o link o foco vai para o campo (que se seleciona ao receber o foco): quem usa o teclado ou um leitor de ecrã
+  // fica no endereço, que só se vê uma vez, e Ctrl+C copia-o logo.
+  useEffect(() => {
+    if (created) linkField.current?.focus();
+  }, [created]);
+
   function createLink() {
     const days = validity === "" ? null : Number(validity);
     setCopy(null);
@@ -53,6 +59,7 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
       setCopy("copied");
     } catch {
       // Sem permissão ou sem ligação segura: seleciona o texto para o utilizador o copiar com o teclado.
+      linkField.current?.focus();
       linkField.current?.select();
       setCopy("failed");
     }

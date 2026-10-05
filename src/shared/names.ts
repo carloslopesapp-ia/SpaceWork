@@ -2,7 +2,10 @@
 
 export const NAME_MAX_LENGTH = 255;
 
-/** Comprimento (em caracteres, depois de tirar espaços e acentos) que uma pesquisa por nome pode ter: a API e a caixa de pesquisa usam os mesmos limites. */
+/**
+ * Comprimento de uma pesquisa por nome. O mínimo conta caracteres (pontos de código) depois de tirar espaços e acentos; o máximo
+ * conta unidades UTF-16 do texto normalizado (NFC, sem espaços nas pontas). A API e a caixa de pesquisa usam os mesmos limites.
+ */
 export const SEARCH_MIN_LENGTH = 2;
 export const SEARCH_MAX_LENGTH = 100;
 
