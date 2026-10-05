@@ -5,6 +5,7 @@ import { useLogout, useMe } from "../auth";
 import { UploadsProvider } from "../uploads-context";
 import { Button } from "./Button";
 import { Message } from "./Message";
+import { SearchBox } from "./SearchBox";
 import { UploadPanel } from "./UploadPanel";
 import { UsageBar } from "./UsageBar";
 
@@ -55,6 +56,7 @@ export default function AppLayout() {
     <div className="min-h-screen md:flex">
       <aside className="flex shrink-0 flex-col gap-6 border-b border-slate-200 bg-white p-4 md:min-h-screen md:w-64 md:border-r md:border-b-0">
         <div className="text-xl font-bold tracking-tight text-indigo-600">SpaceWork</div>
+        <SearchBox />
         <nav className="flex gap-1 md:flex-col" aria-label="Principal">
           {/* "Meu espaço" também fica ativo dentro das pastas (/pasta/...). */}
           <NavLink to="/" end className={({ isActive }) => navClass({ isActive: isActive || pathname.startsWith("/pasta/") })}>

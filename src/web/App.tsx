@@ -4,6 +4,7 @@ import AccountPage from "./pages/AccountPage";
 import FolderPage from "./pages/FolderPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import SearchPage from "./pages/SearchPage";
 
 /**
  * A raiz e `/pasta/:folderId` partilham o mesmo `FolderPage` na árvore do React, que por isso manteria o estado ao mudar
@@ -21,6 +22,7 @@ export default function App() {
       <Route element={<AppLayout />}>
         <Route index element={<FolderRoute />} />
         <Route path="pasta/:folderId" element={<FolderRoute />} />
+        <Route path="pesquisa" element={<SearchPage />} />
         <Route path="conta" element={<AccountPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
