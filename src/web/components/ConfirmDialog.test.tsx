@@ -47,4 +47,9 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "A eliminar…" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "A excluir…" })).not.toBeInTheDocument();
   });
+
+  it("enquanto a ação decorre, «Cancelar» está desativado (não a pode parar)", () => {
+    setup({ pending: true });
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
+  });
 });

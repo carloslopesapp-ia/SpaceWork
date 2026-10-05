@@ -171,7 +171,7 @@ export default function TrashPage() {
           pending={purge.isPending}
           error={purge.error ? errorMessage(purge.error) : null}
           onConfirm={() => purge.mutate(purging.id, { onSuccess: closePurge })}
-          onClose={closePurge}
+          onClose={() => !purge.isPending && closePurge()}
         />
       )}
       {emptying && (
@@ -187,7 +187,7 @@ export default function TrashPage() {
           pending={empty.isPending}
           error={emptyError}
           onConfirm={() => empty.mutate(undefined, { onSuccess: (result) => result.remaining === 0 && closeEmpty() })}
-          onClose={closeEmpty}
+          onClose={() => !empty.isPending && closeEmpty()}
         />
       )}
     </div>

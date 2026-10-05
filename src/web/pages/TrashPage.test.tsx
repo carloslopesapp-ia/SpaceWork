@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { TrashContents, TrashItem } from "../../shared/types";
@@ -187,6 +187,34 @@ describe("TrashPage: eliminar de vez", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Ficheiro não encontrado na lixeira.");
     expect(screen.getByRole("dialog", { name: "Eliminar de vez" })).toBeInTheDocument();
   });
+
+  it("enquanto elimina, Esc e o fundo não fecham o diálogo, «Cancelar» está desativado e a lista também", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = serve(trashOf([OLD, IN_ROOT]), {
+      "DELETE /api/trash/:id": async () => {
+        await gate;
+        state.set(trashOf([IN_ROOT]));
+        return noContent();
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/lixeira");
+    await user.click(await screen.findByRole("button", { name: "Eliminar relatório.pdf de vez" }));
+    const dialog = screen.getByRole("dialog", { name: "Eliminar de vez" });
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar de vez" }));
+    await within(dialog).findByRole("button", { name: "A eliminar…" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(screen.getByRole("dialog", { name: "Eliminar de vez" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restaurar notas.txt" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(state.server.callsTo("DELETE /api/trash/:id")).toHaveLength(1);
+  });
 });
 
 describe("TrashPage: esvaziar", () => {
@@ -247,5 +275,34 @@ describe("TrashPage: esvaziar", () => {
     await user.click(await screen.findByRole("button", { name: "Esvaziar lixeira" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Esvaziar lixeira" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
+  });
+
+  it("enquanto esvazia, Esc e o fundo não fecham o diálogo, «Cancelar» está desativado e a lista também", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state = serve(trashOf([OLD], 1), {
+      "DELETE /api/trash": async () => {
+        await gate;
+        state.set(trashOf([]));
+        return json({ purged: 1, remaining: 0 });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/lixeira");
+    await user.click(await screen.findByRole("button", { name: "Esvaziar lixeira" }));
+    const dialog = screen.getByRole("dialog", { name: "Esvaziar a lixeira" });
+    await user.click(within(dialog).getByRole("button", { name: "Esvaziar lixeira" }));
+    await within(dialog).findByText("A eliminar… 0 de 1");
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.mouseDown(screen.getByTestId("modal-backdrop"));
+
+    expect(screen.getByRole("dialog", { name: "Esvaziar a lixeira" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restaurar relatório.pdf" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("A lixeira está vazia.")).toBeInTheDocument();
+    expect(state.server.callsTo("DELETE /api/trash")).toHaveLength(1);
   });
 });
