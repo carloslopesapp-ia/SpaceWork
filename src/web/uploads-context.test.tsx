@@ -106,7 +106,7 @@ describe("UploadsProvider: um refresh por intervalo", () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   it("vários envios que terminam juntos dão um só refresh, e só depois do intervalo", async () => {
-    const { hook, server, Xhr } = setup(1000, 150);
+    const { hook, server, Xhr } = setup(1000, 400);
     await waitFor(() => expect(hook.result.current.me.data).toBeDefined());
     expect(sessionCalls(server)).toBe(1);
 
@@ -143,7 +143,7 @@ describe("UploadsProvider: um refresh por intervalo", () => {
   });
 
   it("ao desmontar o provider não fica um refresh agendado", async () => {
-    const { hook, server, Xhr, client } = setup(1000, 100);
+    const { hook, server, Xhr, client } = setup(1000, 200);
     await waitFor(() => expect(hook.result.current.me.data).toBeDefined());
     // Outro observador da sessão, fora do provider, para um refresh agendado se notar nos pedidos.
     const observer = renderHook(() => useMe(), { wrapper: queryWrapper(client) });
@@ -152,9 +152,10 @@ describe("UploadsProvider: um refresh por intervalo", () => {
 
     act(() => hook.result.current.uploads.add([new File(["abc"], "a.txt")], null));
     act(() => Xhr.instances[0].respond(201, { file: FILE_ITEM }));
-    await waitFor(() => expect(hook.result.current.uploads.items[0].status).toBe("done"));
+    await act(async () => {}); // despeja as microtarefas que correm `finish` -> `onSettled`, que arma o temporizador
+    expect(hook.result.current.uploads.items[0].status).toBe("done");
     hook.unmount();
-    await sleep(300);
+    await sleep(600); // mais do que o intervalo
 
     expect(sessionCalls(server)).toBe(before);
   });
