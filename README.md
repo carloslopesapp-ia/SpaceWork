@@ -89,6 +89,14 @@ Um link só funciona se não foi revogado nem expirou, o ficheiro está fora da 
 
 ## Interface
 
-Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮»: o das pastas tem renomear, mover e excluir; o dos ficheiros tem também pré-visualizar (imagens e PDF) e descarregar. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem). A API da lixeira, da pesquisa e da partilha já existe, mas só o Plano 3B lhes dá ecrãs: até lá os ficheiros excluídos continuam a ocupar quota até serem eliminados de vez.
+Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮»: o das pastas tem renomear, mover e excluir; o dos ficheiros tem também pré-visualizar (imagens e PDF) e descarregar. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem).
+
+A **caixa de pesquisa** está na barra lateral de todas as páginas: Enter leva a `/pesquisa?q=...`, que lista as pastas e os ficheiros que têm o texto no nome (2 a 100 caracteres, até 50 resultados), cada um com a pasta onde está e com as mesmas ações das linhas de «Meu espaço». O endereço da pesquisa pode ser guardado ou copiado.
+
+**Lixeira** (`/lixeira`): lista os ficheiros excluídos (os 200 mais recentes) com a pasta onde estavam, o tamanho e as datas de exclusão e de eliminação automática (o cron que a aplica chega no Plano 4). «Restaurar» devolve o ficheiro à pasta de origem (ou à raiz) e diz com que nome ficou; «Eliminar de vez» e «Esvaziar lixeira» pedem confirmação, e esvaziar vai mostrando o progresso. Os ficheiros excluídos continuam a ocupar quota até serem eliminados de vez.
+
+**Partilhar**: «Partilhar…» no menu de um ficheiro abre um diálogo para criar links (sem validade, 1, 7 ou 30 dias), copiar o link, ver os links ativos e revogá-los. **O link completo só se vê logo a seguir a criá-lo** (o servidor guarda só o hash do token); depois só se vê a data de criação e a validade. Quem recebe o link abre `/s/<token>` sem iniciar sessão, vê o nome e o tamanho e descarrega o ficheiro; um link revogado, expirado ou de um ficheiro excluído mostra sempre o mesmo aviso. A página não carrega recursos de outras origens.
+
+**Sair** com envios em curso pede confirmação (sair cancela-os). Quando vários envios terminam, as listagens e a quota atualizam-se uma vez por meio segundo, e não uma vez por ficheiro.
 
 Não fazer `git push` sem confirmação do dono do projeto.

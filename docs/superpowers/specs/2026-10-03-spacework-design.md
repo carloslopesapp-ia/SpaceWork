@@ -177,7 +177,7 @@ Cada execução é idempotente e trabalha em lotes limitados, para respeitar os 
 | Rota | Conteúdo |
 |---|---|
 | `/login`, `/registo` | Formulários de email e senha (o registo pede confirmação da senha). |
-| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master), Sair, e barra de uso. Cabeçalho com caminho da pasta (*breadcrumb*), pesquisa, "Nova pasta" e "Carregar". Lista de pastas e ficheiros com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
+| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master), Sair, e barra de uso. A caixa de pesquisa fica na barra lateral, em todas as páginas (Enter leva a `/pesquisa?q=`, com os resultados e o caminho de cada um). Cabeçalho com caminho da pasta (*breadcrumb*), "Nova pasta" e "Carregar". Lista de pastas e ficheiros com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
 | `/lixeira` | Ficheiros excluídos: Restaurar, Eliminar definitivamente, Esvaziar lixeira. |
 | `/conta` | Alterar senha. |
 | `/admin` | Tabela de utilizadores (email, usado/quota, estado, data de criação); editar quota, suspender/reativar, apagar. |
