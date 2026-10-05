@@ -1,6 +1,6 @@
-import { act, cleanup, createEvent, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORK_ERROR_MESSAGE } from "../api";
 import { ME_KEY } from "../auth";
 import { stubXhr } from "../test/fake-xhr";
@@ -143,5 +143,93 @@ describe("AppLayout", () => {
     expect(await screen.findByText("outra@example.com")).toBeInTheDocument(); // o React Query avisa os componentes no tick seguinte
     await waitFor(() => expect(abort).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("progressbar", { name: "Envio de nota.txt" })).not.toBeInTheDocument());
+  });
+});
+
+describe("AppLayout: «Sair» com envios em curso", () => {
+  // O `FakeXhr` é uma classe de módulo: sem repor o espião, o `abort` de um teste soma-se ao do seguinte.
+  afterEach(() => vi.restoreAllMocks());
+
+  function serveSession() {
+    let signedIn = true;
+    return mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": () => (signedIn ? json({ user: ME }) : apiError(401, "unauthorized", "Sessão inválida ou expirada.")),
+      "GET /api/config": () => json({ maxUploadBytes: 1_000_000 }),
+      "POST /api/auth/logout": () => {
+        signedIn = false;
+        return noContent();
+      },
+    });
+  }
+
+  async function startUpload(user: ReturnType<typeof userEvent.setup>) {
+    await user.upload(await screen.findByLabelText("Escolher ficheiros"), new File(["abc"], "a.txt"));
+    await screen.findByRole("progressbar", { name: "Envio de a.txt" });
+  }
+
+  it("pede confirmação; «Cancelar» deixa a sessão e o envio como estavam", async () => {
+    const Xhr = stubXhr();
+    const abort = vi.spyOn(Xhr.prototype, "abort");
+    const server = serveSession();
+    const user = userEvent.setup();
+    renderApp("/");
+    await startUpload(user);
+
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+    const dialog = screen.getByRole("dialog", { name: "Sair com envios em curso" });
+    expect(dialog).toHaveTextContent("Há envios por terminar. Se sair agora, são cancelados. Sair mesmo assim?");
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(server.callsTo("POST /api/auth/logout")).toHaveLength(0);
+    expect(abort).not.toHaveBeenCalled();
+    expect(screen.getByRole("progressbar", { name: "Envio de a.txt" })).toBeInTheDocument();
+  });
+
+  it("«Sair» no diálogo termina a sessão e cancela os envios", async () => {
+    const Xhr = stubXhr();
+    const abort = vi.spyOn(Xhr.prototype, "abort");
+    const server = serveSession();
+    const user = userEvent.setup();
+    renderApp("/");
+    await startUpload(user);
+
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sair" }));
+
+    expect(await screen.findByRole("heading", { name: "Entrar" })).toBeInTheDocument();
+    expect(server.callsTo("POST /api/auth/logout")).toHaveLength(1);
+    await waitFor(() => expect(abort).toHaveBeenCalledTimes(1));
+  });
+
+  it("se terminar a sessão falhar, o erro aparece no diálogo (uma só vez) e a sessão continua", async () => {
+    stubXhr();
+    mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": () => json({ user: ME }),
+      "GET /api/config": () => json({ maxUploadBytes: 1_000_000 }),
+      "POST /api/auth/logout": () => apiError(500, "internal_error", "Erro interno do servidor."),
+    });
+    const user = userEvent.setup();
+    renderApp("/");
+    await startUpload(user);
+
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sair" }));
+
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("Erro interno do servidor.");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Principal" })).toBeInTheDocument();
+  });
+
+  it("sem envios, «Sair» não pergunta nada", async () => {
+    const server = serveSession();
+    const user = userEvent.setup();
+    renderApp("/");
+    await user.click(await screen.findByRole("button", { name: "Sair" }));
+    expect(screen.queryByRole("dialog", { name: "Sair com envios em curso" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Entrar" })).toBeInTheDocument();
+    expect(server.callsTo("POST /api/auth/logout")).toHaveLength(1);
   });
 });

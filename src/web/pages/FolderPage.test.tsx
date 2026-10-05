@@ -304,8 +304,9 @@ describe("FolderPage: envio e pré-visualização", () => {
     markUploaded();
     act(() => Xhr.instances[0].respond(201, { file: NEW_FILE }));
     expect(await screen.findByText("Concluído")).toBeInTheDocument();
-    // Só existe na linha da lista (o `<span>` do painel de envios também diz «nota.txt»).
-    expect(await screen.findByRole("button", { name: "Ações para o ficheiro nota.txt" })).toBeInTheDocument();
+    // Só existe na linha da lista (o `<span>` do painel de envios também diz «nota.txt»). A lista atualiza-se
+    // quando o intervalo do refresh (500 ms) acaba, por isso a espera é maior do que a de por defeito.
+    expect(await screen.findByRole("button", { name: "Ações para o ficheiro nota.txt" }, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it("arrastar e largar ficheiros envia-os para a pasta atual", async () => {

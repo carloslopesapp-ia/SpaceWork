@@ -9,7 +9,7 @@ import { NameDialog } from "../components/NameDialog";
 import { filesFromDrop } from "../dropped-files";
 import { useContents, useCreateFolder } from "../space";
 import { ROOT_LABEL } from "../tree";
-import { useUploads } from "../uploads-context";
+import { useUploadActions } from "../uploads-context";
 
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 
@@ -18,7 +18,7 @@ export default function FolderPage() {
   const folderId = useParams().folderId ?? null;
   const contents = useContents(folderId);
   const createFolder = useCreateFolder();
-  const uploads = useUploads();
+  const uploads = useUploadActions(); // só as ações: a página não re-renderiza com o progresso dos envios
   const [creating, setCreating] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);

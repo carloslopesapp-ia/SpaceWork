@@ -48,8 +48,10 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch("/api/auth/logout", { method: "POST" }),
+    // Esquece tudo o que era da conta e deixa a sessão a `null`, como no 401 (ver `createQueryClient`). Sem `clear()`: ele tirava a
+    // consulta da sessão da cache e quem a observa só dava pela nova ao re-renderizar.
     onSuccess: () => {
-      queryClient.clear();
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
       queryClient.setQueryData(ME_KEY, null);
     },
   });
