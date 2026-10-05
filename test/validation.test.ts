@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidEmail, isValidPassword, normalizeEmail } from "../src/shared/validation";
+import { isValidEmail, isValidPassword, isValidQuota, MAX_QUOTA_BYTES, normalizeEmail } from "../src/shared/validation";
 
 describe("normalizeEmail", () => {
   it("remove espaços e passa para minúsculas", () => {
@@ -33,5 +33,17 @@ describe("isValidPassword", () => {
     expect(isValidPassword("12345678")).toBe(true);
     expect(isValidPassword("x".repeat(128))).toBe(true);
     expect(isValidPassword("x".repeat(129))).toBe(false);
+  });
+});
+
+describe("isValidQuota", () => {
+  it("aceita inteiros de 0 a MAX_QUOTA_BYTES", () => {
+    for (const quota of [0, 1, 1_073_741_824, MAX_QUOTA_BYTES]) expect(isValidQuota(quota), String(quota)).toBe(true);
+  });
+
+  it("recusa o que não é um inteiro seguro nesse intervalo", () => {
+    for (const quota of [-1, 1.5, MAX_QUOTA_BYTES + 1, Number.NaN, Number.POSITIVE_INFINITY, "10", null, undefined, {}]) {
+      expect(isValidQuota(quota), String(quota)).toBe(false);
+    }
   });
 });

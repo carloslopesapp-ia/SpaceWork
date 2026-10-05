@@ -91,3 +91,14 @@ export interface PublicShare {
   name: string;
   size: number;
 }
+
+/** Uma conta tal como o painel de administração a vê (nunca inclui a senha). */
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: Role;
+  status: UserStatus;
+  quotaBytes: number;
+  usedBytes: number;
+  createdAt: number;
+}

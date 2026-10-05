@@ -55,3 +55,13 @@ export async function insertUser(email: string, options: UserRowOptions = {}): P
     .run();
   return id;
 }
+
+/** Regista um utilizador e promove-o a administrador (o registo só cria utilizadores normais). O cookie devolvido continua válido. */
+export async function registerAdmin(
+  email = "admin@example.com",
+  password = "senha-admin-123",
+): Promise<{ cookie: string; user: PublicUser; password: string }> {
+  const result = await registerUser(email, password);
+  await env.DB.prepare("UPDATE users SET role = 'admin' WHERE id = ?1").bind(result.user.id).run();
+  return result;
+}

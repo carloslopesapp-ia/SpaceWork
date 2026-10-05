@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { ApiError } from "./errors";
 import { jsonBodyLimit } from "./middleware/body-limit";
 import { originCheck, securityHeaders } from "./middleware/security";
+import { admin } from "./routes/admin";
 import { auth } from "./routes/auth";
 import { clientConfig } from "./routes/config";
 import { files } from "./routes/files";
@@ -28,6 +29,7 @@ app.get("/api/health", async (c) => {
   return c.json({ ok: row?.ok === 1 });
 });
 
+app.route("/api/admin", admin);
 app.route("/api/auth", auth);
 app.route("/api/config", clientConfig);
 app.route("/api/folders", folders);
