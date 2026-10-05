@@ -309,7 +309,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { registerUser } from "./auth-helpers";
 import { dbWithStatementHook } from "./db-helpers";
-import { countFiles, rawUpload, usedBytes } from "./file-helpers";
+import { countFiles, rawUpload, uploadOk, usedBytes } from "./file-helpers";
 import { resetState } from "./helpers";
 
 beforeEach(resetState);
@@ -317,6 +317,9 @@ beforeEach(resetState);
 describe("PUT /api/files: a reserva desapareceu antes de o envio acabar", () => {
   it("o objeto sai do R2, a quota não fica a dever nada e a resposta é 409 upload_expired (não 201)", async () => {
     const { cookie, user } = await registerUser("ana@example.com");
+    // Um ficheiro pronto da mesma conta: a quota só fica certa se a reserva do envio caducado for devolvida uma vez (duas devoluções
+    // desciam abaixo do tamanho deste ficheiro, e o `MAX(..., 0)` escondia-o se a conta estivesse vazia).
+    const kept = await uploadOk(cookie, "kept.txt", "abc");
     // Imediatamente antes do `UPDATE ... 'ready'`, faz o que a manutenção faz a um envio pendente velho: devolve o espaço e apaga a linha.
     const db = dbWithStatementHook(/SET status = 'ready'/, async () => {
       await env.DB.batch([
@@ -329,9 +332,9 @@ describe("PUT /api/files: a reserva desapareceu antes de o envio acabar", () => 
 
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "upload_expired" });
-    expect((await env.FILES.list({ prefix: "u/" })).objects).toHaveLength(0);
-    expect(await usedBytes(cookie)).toBe(0);
-    expect(await countFiles()).toBe(0);
+    expect((await env.FILES.list({ prefix: "u/" })).objects.map((object) => object.key)).toEqual([`u/${user.id}/${kept.id}`]); // só o ficheiro pronto
+    expect(await usedBytes(cookie)).toBe(kept.size);
+    expect(await countFiles()).toBe(1);
   });
 });
 ```
@@ -1743,7 +1746,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  7 passed (7)`.
 
 - [ ] **Step 2: As rotas do administrador (testes primeiro)**
 
-Regras (spec, secções 4 e 6): só `role = admin` entra em `/api/admin/*` (`403 forbidden` aos outros, `401` sem sessão); **não há nenhuma rota para ver ou descarregar ficheiros alheios**, e um teste fixa a lista das três rotas; uma conta de administrador não se suspende nem se apaga (`403 admin_protected`, mas a quota muda-se); apagar uma conta põe-na em `deleting` e termina as sessões, e quem a remove é o cron da Task 4. **Suspender termina as sessões** (pendente do Plano 1): o filtro `status = 'active'` da autenticação não chega, porque ao reativar a conta as sessões antigas voltariam a valer; por isso o `UPDATE` do estado e o `DELETE` das sessões vão na mesma `batch` e um teste reativa a conta e confirma que as sessões de antes continuam mortas. O teste da forma da resposta fixa os campos de cada conta (sem `password_hash`): pendente do Plano 1. O email de uma conta em remoção continua ocupado até o cron acabar (o registo dá `409 email_taken`), o que um teste de ponta a ponta mostra.
+Regras (spec, secções 4 e 6): só `role = admin` entra em `/api/admin/*` (`403 forbidden` aos outros, `401` sem sessão); **não há nenhuma rota para ver ou descarregar ficheiros alheios**, e um teste fixa a lista das três rotas; uma conta de administrador não se suspende nem se apaga (`403 admin_protected`, mas a quota muda-se); apagar uma conta põe-na em `deleting` e termina as sessões, e quem a remove é o cron da Task 4. **Suspender termina as sessões** (pendente do Plano 1): o filtro `status = 'active'` da autenticação não chega, porque ao reativar a conta as sessões antigas voltariam a valer; por isso o `UPDATE` do estado e o `DELETE` das sessões vão na mesma `batch` e um teste reativa a conta e confirma que as sessões de antes continuam mortas. O teste da forma da resposta fixa os campos de cada conta (sem `password_hash`): pendente do Plano 1. A conta em remoção é terminal: o `UPDATE` do estado só toca contas que não estão em `deleting` (`AND status != 'deleting'`) e, se a conta passou a `deleting` entre a leitura e a escrita (um «Reativar» a competir com um «Apagar»), responde `409 account_deleting`; um teste simula essa corrida, porque reativar uma conta que o cron está prestes a varrer deixaria o R2 limpo e as linhas de pé. O email de uma conta em remoção continua ocupado até o cron acabar (o registo dá `409 email_taken`), o que um teste de ponta a ponta mostra.
 
 Acrescentar ao fim de `test/auth-helpers.ts`:
 
@@ -1769,7 +1772,7 @@ import { MAX_QUOTA_BYTES } from "../src/shared/validation";
 import { app } from "../src/worker/app";
 import { runMaintenance } from "../src/worker/cron";
 import { insertUser, login, registerAdmin, registerUser } from "./auth-helpers";
-import { dbWithBatchHook, fetchWithEnv } from "./db-helpers";
+import { dbWithBatchHook, dbWithStatementHook, fetchWithEnv } from "./db-helpers";
 import { uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { api, buildRequest, resetState, sessionCookie } from "./helpers";
 
@@ -1950,6 +1953,24 @@ describe("PATCH /api/admin/users/:id: suspender e reativar", () => {
 
     expect((await patch(admin.cookie, admin.user.id, { quotaBytes: 5 })).status).toBe(200);
   });
+
+  it("«Reativar» a competir com «Apagar»: a conta passa a `deleting` entre a leitura e o UPDATE e continua `deleting` (409 account_deleting)", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await insertUser("ana@example.com", { status: "suspended" });
+    // `before` corre imediatamente antes do UPDATE do pedido, depois de a rota ter lido a conta como `suspended`
+    const racingDb = dbWithStatementHook(/^\s*UPDATE users SET quota_bytes = COALESCE/, async () => {
+      await env.DB.prepare("UPDATE users SET status = 'deleting' WHERE id = ?1").bind(ana).run();
+    });
+
+    const res = await fetchWithEnv(
+      buildRequest(`/api/admin/users/${ana}`, { method: "PATCH", cookie: admin.cookie, json: { status: "active" } }),
+      { DB: racingDb },
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "account_deleting" });
+    expect(await statusOf(ana)).toBe("deleting"); // `deleting` é terminal: o cron vai varrer a conta
+  });
 });
 
 describe("DELETE /api/admin/users/:id", () => {
@@ -2011,7 +2032,7 @@ describe("DELETE /api/admin/users/:id", () => {
 ```
 
 Run: `npx vitest run test/admin.test.ts`
-Expected: FAIL (Test Files  1 failed (1); Tests  14 failed (14)).
+Expected: FAIL (Test Files  1 failed (1); Tests  15 failed (15)).
 
 Acrescentar ao fim de `src/shared/types.ts`:
 
@@ -2189,12 +2210,12 @@ app.route("/api/auth", auth);
 ```
 
 Run: `npx vitest run test/admin.test.ts`
-Expected: `Test Files  1 passed (1)`, `Tests  14 passed (14)`.
+Expected: `Test Files  1 passed (1)`, `Tests  15 passed (15)`.
 
 - [ ] **Step 3: Verificação e commit**
 
 Run: `npx vitest run`
-Expected: `Test Files  36 passed (36)`, `Tests  316 passed (316)`.
+Expected: `Test Files  36 passed (36)`, `Tests  317 passed (317)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2781,7 +2802,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  7 passed (7)`.
 
 - [ ] **Step 2: O menu das contas e os diálogos (testes primeiro)**
 
-Cada conta ganha um menu «⋮» (`RowMenu`) com «Alterar quota…», «Suspender…» (ou «Reativar») e «Apagar conta…». Uma conta de administrador só tem a quota, como a API (403 `admin_protected` no resto); uma conta em remoção não tem menu. **Suspender** e **Apagar** pedem confirmação com o `ConfirmDialog` (que já não se fecha enquanto o pedido decorre); apagar avisa que não se pode desfazer, que a remoção acontece na manutenção de hora a hora e que o email fica ocupado até lá. **Reativar** não pede confirmação (não se perde nada); se falhar, o erro aparece por baixo do menu. O `QuotaDialog` aceita GB e mostra o espaço usado; segue a mesma regra de não se fechar a meio do pedido. O estado de cada diálogo é o do hook `useDialog` (Plano 3B). Depois de cada ação a lista refaz-se (Task 6), por isso a tabela mostra o estado novo.
+Cada conta ganha um menu «⋮» (`RowMenu`) com «Alterar quota…», «Suspender…» (ou «Reativar») e «Apagar conta…». Uma conta de administrador só tem a quota, como a API (403 `admin_protected` no resto); uma conta em remoção não tem menu. **Suspender** e **Apagar** pedem confirmação com o `ConfirmDialog` (que já não se fecha enquanto o pedido decorre); apagar avisa que não se pode desfazer, que a remoção acontece na manutenção de hora a hora e que o email fica ocupado até lá. **Reativar** não pede confirmação (não se perde nada); se falhar, o erro aparece por baixo do menu. O `QuotaDialog` aceita GB e mostra o espaço usado; segue a mesma regra de não se fechar a meio do pedido. **Guardar sem editar o campo fecha o diálogo e não envia nada**: o campo mostra a quota arredondada a duas casas e enviá-la regravaria em silêncio uma quota que não seja um valor exato em GB (por exemplo, uma posta pela API; 1 000 000 bytes aparecem como «0»). O estado de cada diálogo é o do hook `useDialog` (Plano 3B). Depois de cada ação a lista refaz-se (Task 6), por isso a tabela mostra o estado novo.
 
 Criar `src/web/components/UserActions.test.tsx`:
 
@@ -2866,10 +2887,25 @@ describe("UserActions: quota", () => {
     expect(server.callsTo("PATCH /api/admin/users/:id")).toHaveLength(0);
   });
 
+  it("guardar sem editar o campo fecha o diálogo e não grava (o campo arredonda a quota, que pode não ser um valor exato em GB)", async () => {
+    const server = mockApi({ "PATCH /api/admin/users/:id": () => json({ user: ANA }) });
+    const user = setup({ ...ANA, quotaBytes: 1_000_000 });
+    await choose(user, "Alterar quota…");
+    const dialog = screen.getByRole("dialog", { name: "Quota de ana@example.com" });
+    expect(within(dialog).getByLabelText("Quota (GB)")).toHaveValue("0");
+
+    await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(server.callsTo("PATCH /api/admin/users/:id")).toHaveLength(0);
+  });
+
   it("um erro do servidor fica no diálogo, que continua aberto", async () => {
     mockApi({ "PATCH /api/admin/users/:id": () => apiError(409, "account_deleting", "Esta conta está a ser removida.") });
     const user = setup();
     await choose(user, "Alterar quota…");
+    await user.clear(screen.getByLabelText("Quota (GB)"));
+    await user.type(screen.getByLabelText("Quota (GB)"), "2");
     await user.click(screen.getByRole("button", { name: "Guardar" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Esta conta está a ser removida.");
     expect(screen.getByRole("dialog", { name: "Quota de ana@example.com" })).toBeInTheDocument();
@@ -2887,6 +2923,8 @@ describe("UserActions: quota", () => {
     const user = setup();
     await choose(user, "Alterar quota…");
     const dialog = screen.getByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("Quota (GB)"));
+    await user.type(within(dialog).getByLabelText("Quota (GB)"), "2");
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await within(dialog).findByRole("button", { name: "A guardar…" });
 
@@ -2993,11 +3031,17 @@ interface QuotaDialogProps {
 
 /** Muda a quota de uma conta, em GB. Uma quota abaixo do uso atual é permitida: só impede novos envios. */
 export function QuotaDialog({ user, pending, error, onSubmit, onClose }: QuotaDialogProps) {
-  const [text, setText] = useState(quotaToGbText(user.quotaBytes));
+  // O campo arredonda a quota a duas casas: guardar sem o editar não pode regravar a quota com o valor arredondado.
+  const [initialText] = useState(() => quotaToGbText(user.quotaBytes));
+  const [text, setText] = useState(initialText);
   const [localError, setLocalError] = useState<string | null>(null);
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (text.trim() === initialText) {
+      onClose();
+      return;
+    }
     const bytes = parseQuotaGb(text);
     setLocalError(bytes === null ? QUOTA_HINT : null);
     if (bytes !== null) onSubmit(bytes);
@@ -3123,7 +3167,7 @@ export function UserActions({ user }: { user: AdminUser }) {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/UserActions.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  12 passed (12)`.
+Expected: `Test Files  1 passed (1)`, `Tests  13 passed (13)`.
 
 - [ ] **Step 3: As ações na tabela (testes primeiro)**
 
@@ -3251,7 +3295,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  8 passed (8)`.
 - [ ] **Step 4: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  34 passed (34)`, `Tests  264 passed (264)`.
+Expected: `Test Files  34 passed (34)`, `Tests  265 passed (265)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3332,10 +3376,12 @@ por:
 eliminação automática (30 dias depois, por defeito, `TRASH_RETENTION_DAYS`; é o cron de manutenção que a aplica)
 ```
 
-Ainda na secção «Interface», no fim do parágrafo de «Sair», acrescentar a administração e a secção «Manutenção». Trocar:
+Ainda na secção «Interface», depois do parágrafo de «Sair», acrescentar a administração; a linha final sobre o `git push` continua a fechar a secção e a seguir entra a secção «Manutenção». Trocar:
 
 ```markdown
 Quando vários envios terminam, as listagens e a quota atualizam-se uma vez por meio segundo, e não uma vez por ficheiro.
+
+Não fazer `git push` sem confirmação do dono do projeto.
 ```
 
 por:
@@ -3350,6 +3396,8 @@ Quando vários envios terminam, as listagens e a quota atualizam-se uma vez por 
 - «Apagar conta…» (pede confirmação, não se pode desfazer): a conta passa a «A remover» e o cron elimina os ficheiros, as pastas e os links na manutenção seguinte.
 
 As contas de administrador só têm a quota, e uma conta «A remover» não tem menu.
+
+Não fazer `git push` sem confirmação do dono do projeto.
 
 ## Manutenção
 
@@ -3464,13 +3512,13 @@ por:
 - Resolvido: suspender uma conta apaga as suas sessões na mesma `batch` do `UPDATE` (o filtro por `status` não chegava: ao reativar, as sessões antigas voltariam a valer); apagar uma conta (`deleting`) também as termina.
 - Resolvido: a troca de senha é uma só `db.batch` (o `UPDATE` da senha e a revogação das outras sessões, com `deleteUserSessionsStatement`).
 - Resolvido: o cron de manutenção (`src/worker/cron.ts`, de hora a hora, com um passo isolado por tarefa: o que um passo falha não pára os outros e a execução acaba com erro): elimina a lixeira expirada, os envios `pending` com mais de 1 hora, as contas em remoção, as sessões expiradas, as `login_failures` com mais de 1 dia e as partilhas revogadas ou expiradas há mais de 30 dias. No pior caso gasta 32 dos 50 subpedidos de uma invocação.
-- Resolvido: o `UPDATE … 'ready'` do upload passou a `AND status = 'pending'` com `meta.changes` verificado (se o cron já limpou o envio, o objeto do R2 sai e a resposta é 409 `upload_expired`), e o corte do cron (1 hora) é maior do que qualquer upload.
+- Resolvido: o `UPDATE … 'ready'` do upload passou a `AND status = 'pending'` com `meta.changes` verificado (se o cron já limpou o envio, o objeto do R2 sai e a resposta é 409 `upload_expired`), e o corte do cron (1 hora) é maior do que um upload normal (um envio mais lento recebe 409 `upload_expired`).
 - Resolvido: `purgeTrashed` foi generalizado em `lib/purge.ts` (`purgeFiles`: o `UPDATE users` desconta a quota de cada dono e o `DELETE … RETURNING r2_key` apaga as linhas, com a mesma condição, para vários donos de uma vez), por isso o cron não agrupa por utilizador; a escrita sem efeito de `DELETE /api/trash/:id` com 404 desapareceu.
 - Resolvido: a remoção de uma conta apaga primeiro os objetos do R2 pelo prefixo `u/<userId>/` (apanha também os órfãos de `releaseReservation`) e só quando o prefixo está vazio apaga as linhas, filhos primeiro (partilhas, ficheiros, pastas num só `DELETE … WHERE user_id`, sessões, utilizador). Uma conta grande leva várias execuções.
 - Resolvido: migração `0003_maintenance_indexes.sql` com os índices parciais das varreduras do cron (`files_pending_created`, `files_trash_expiry`, `login_failures_failed_at`, `shares_revoked_at`, `shares_expires_at`, `users_deleting`); um teste confirma com `EXPLAIN QUERY PLAN` que as consultas os usam.
 - Resolvido: `GET /api/admin/users` tem um teste que fixa a forma exata de cada conta (sem `password_hash`) e a lista de rotas de `admin.ts` está fixada por outro (só gerem contas e quotas: nenhuma lê ficheiros alheios); `npm run cf-typegen` correu depois de o cron entrar em `wrangler.jsonc` e `worker-configuration.d.ts` não mudou.
 - Decidido: uma conta `deleting` continua a ocupar o email (registar-se com ele dá 409) até o cron a remover, no máximo uma hora ou algumas mais se a conta for grande; fica dito na especificação, no README e no aviso do diálogo «Apagar conta…».
-- Fica sem plano (4): uma tabela de chaves por apagar (*outbox*) para as falhas do R2 (se o R2 falha ao apagar o objeto de um ficheiro eliminado de uma conta ativa, o objeto fica órfão e só aparece no registo; a varredura por prefixo só o apanha quando a conta é removida); o índice parcial `shares (file_id) WHERE revoked_at IS NULL`; a remoção das linhas de uma conta enorme é uma só `batch` na D1 (uma conta com centenas de milhares de ficheiros pode não caber nos limites de uma instrução); um login que corre ao mesmo tempo que a suspensão pode criar uma sessão que a suspensão não apaga (o filtro por estado recusa-a enquanto a conta está suspensa, mas voltaria a valer ao reativar); a tabela de contas no telemóvel rola na horizontal (não há vista em cartões) e não tem paginação (a spec dispensa-a na v1).
+- Fica sem plano (4): uma tabela de chaves por apagar (*outbox*) para as falhas do R2 (se o R2 falha ao apagar o objeto de um ficheiro eliminado de uma conta ativa, o objeto fica órfão e só aparece no registo; a varredura por prefixo só o apanha quando a conta é removida); o índice parcial `shares (file_id) WHERE revoked_at IS NULL`; a remoção das linhas de uma conta enorme é uma só `batch` na D1 (uma conta com centenas de milhares de ficheiros pode não caber nos limites de uma instrução); um login que corre ao mesmo tempo que a suspensão pode criar uma sessão que a suspensão não apaga (o filtro por estado recusa-a enquanto a conta está suspensa, mas voltaria a valer ao reativar); a tabela de contas no telemóvel rola na horizontal (não há vista em cartões) e não tem paginação (a spec dispensa-a na v1); `purgeExpiredTrash` não confere a expiração (um ficheiro restaurado e excluído outra vez entre a consulta do cron e a eliminação, numa janela de menos de um segundo à hora certa, seria eliminado cedo); `removeDeletingAccounts` não isola as contas (uma conta mais antiga que falhe sempre bloqueia a seguinte todas as horas); uma janela de milissegundos entre a varredura do R2 e a remoção das linhas em que um envio a acabar deixaria um objeto órfão.
 ```
 
 Na secção «Plano 5 (deploy)», antes do ponto «Novo (revisão final do 3A)», trocar:
@@ -3482,7 +3530,7 @@ Na secção «Plano 5 (deploy)», antes do ponto «Novo (revisão final do 3A)»
 por:
 
 ```markdown
-- Novo (4), browser real com o Playwright: o painel `/admin` (alterar a quota, suspender e reativar, apagar uma conta); a conta suspensa perde a sessão e o login dá erro; a quota 0 impede um envio; a conta apagada fica «A remover» e desaparece depois da manutenção. Em produção: confirmar que o gatilho `0 * * * *` corre, que a execução mais pesada cabe nos 50 subpedidos (se não couber, baixar `TRASH_BLOCKS`, `PENDING_BLOCKS` ou `ACCOUNTS_PER_RUN` em `cron.ts` e `account-removal.ts`) e decidir um alerta para quando a execução termina com erro.
+- Novo (4), browser real com o Playwright: o painel `/admin` (alterar a quota, suspender e reativar, apagar uma conta); a conta suspensa perde a sessão e o login dá erro; a quota 0 impede um envio; a conta apagada fica «A remover» e desaparece depois da manutenção. Em produção: confirmar que o gatilho `0 * * * *` corre, que a execução mais pesada cabe nos 50 subpedidos (se não couber, baixar `TRASH_BLOCKS`, `PENDING_BLOCKS` ou `ACCOUNTS_PER_RUN` em `cron.ts` e `account-removal.ts`) e decidir um alerta para quando a execução termina com erro. Medir também o tempo de CPU da pior execução do cron (4 páginas de 1000 objetos do R2 e 450 ids) contra o limite do plano gratuito; confirmar se uma rejeição dentro de `ctx.waitUntil` marca a execução como falhada (se não, `async scheduled` com `await`); registar o relatório de sucesso quando o `observability` estiver ligado.
 - Novo (revisão final do 3A): teste de fumo
 ```
 
@@ -3502,10 +3550,10 @@ Os testes correm em jsdom e no runtime do Workers: não veem o aspeto, o foco ne
 - [ ] **Step 5: Verificação final e commit**
 
 Run: `npx vitest run`
-Expected: `Test Files  36 passed (36)`, `Tests  316 passed (316)`.
+Expected: `Test Files  36 passed (36)`, `Tests  317 passed (317)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  34 passed (34)`, `Tests  264 passed (264)`.
+Expected: `Test Files  34 passed (34)`, `Tests  265 passed (265)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3543,11 +3591,12 @@ git commit -m "Documenta o painel do administrador e a manutenção por cron e f
 
 **Fora deste plano:** o deploy, o Playwright e as medições na Cloudflare (CPU do PBKDF2, a contagem real de subpedidos do cron, o limite de pedidos): Plano 5. Ficam sem plano (e registados no índice): a tabela de chaves por apagar para as falhas do R2 em contas ativas, o índice parcial `shares (file_id) WHERE revoked_at IS NULL`, a remoção das linhas de uma conta enorme numa só `batch`, a corrida entre um login e a suspensão, e a tabela de contas no telemóvel.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 36 passed (36); Tests 316 passed (316). Interface: Test Files 34 passed (34); Tests 264 passed (264).
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 36 passed (36); Tests 317 passed (317). Interface: Test Files 34 passed (34); Tests 265 passed (265).
 
 ## Notas da execução
 
 - **Decisões de desenho que a especificação deixa em aberto:** a quota na API é `quotaBytes` (a coluna é `quota_bytes`), em bytes; na interface, em GB com vírgula ou ponto. Numa conta de admin só a quota muda. Uma conta em `deleting` ocupa o email até o cron a remover (o aviso do diálogo «Apagar conta…» di-lo): o email é único e a linha só sai no fim, depois de o R2 estar limpo. A remoção de uma conta grande reparte-se por execuções (2 páginas de 1000 objetos por conta e por execução) e as linhas só saem quando o prefixo no R2 está vazio. «Reativar» não pede confirmação (não se perde nada); «Suspender» e «Apagar» sim.
 - **A conta do orçamento do cron:** lixeira 1 consulta + 6 blocos × 2 = 13; pendentes 1 + 3 × 2 = 7; contas em remoção 1 + 2 × (2 × 2 + 1) = 11; limpeza 1 `batch` = 1. Somam 32 no pior caso: um teste conta os subpedidos reais de uma execução com contas grandes a acabar (32) e outro os das restantes etapas sem contas em remoção (22).
 - **Defeitos que a verificação encontrou, já corrigidos neste plano:** o erro de «Reativar» aparecia dentro do diálogo da quota aberto a seguir (a mutação partilhada guardava o erro antigo): `UserActions` repõe as mutações ao abrir cada diálogo. Ao escrever os testes da remoção de contas, o passo da lixeira apagava primeiro o ficheiro excluído da conta (já expirado) e o teste esperava contá-lo na remoção: o ficheiro do teste passou a estar na lixeira mas ainda não expirado. E o `npm run cf-typegen` não altera `worker-configuration.d.ts` quando o cron entra em `wrangler.jsonc`.
-- **Verificação manual:** o guião da Task 8 foi percorrido contra o `npm run dev` durante a escrita deste plano, com contas fictícias numa base local limpa: a tabela de contas, a quota 0 a impedir um envio, suspender e reativar (a sessão cai e o login falha), apagar («A remover», sem menu, email ocupado) e, com o gatilho local do cron, a conta a sair e o email a ficar livre. O passo do guião sobre o link de partilha da conta suspensa (deixa de funcionar e volta ao reativar) segue o que o código e os testes da API pública garantem, mas não foi percorrido no browser: confirmá-lo ao executar.
+- **Correções que a revisão final acrescentou a este plano (já nos passos acima):** o `QuotaDialog` já não regrava a quota se se carrega em «Guardar» sem editar o campo (o campo arredonda a duas casas: 1 000 000 bytes apareciam como «0» e gravavam 0); um teste fixa a corrida «Reativar» contra «Apagar» (`deleting` é terminal: `AND status != 'deleting'` no `UPDATE` e 409 `account_deleting`); o teste do envio que perdeu a reserva já distingue uma dupla devolução de quota (a conta tem um ficheiro pronto); a linha sobre o `git push` continua a fechar a «Interface» do README, antes da secção «Manutenção»; os itens que ficam sem plano (a janela de `purgeExpiredTrash`, o isolamento por conta da remoção, a janela de milissegundos entre a varredura do R2 e a remoção das linhas) e o que o Plano 5 tem de medir (CPU da pior execução do cron, `waitUntil`, relatório de sucesso nos registos) ficam no índice dos planos.
+- **Verificação manual:** o guião da Task 8 foi percorrido contra o `npm run dev` durante a escrita deste plano, com contas fictícias numa base local limpa: a tabela de contas, a quota 0 a impedir um envio, suspender e reativar (a sessão cai e o login falha), apagar («A remover», sem menu, email ocupado) e, com o gatilho local do cron, a conta a sair e o email a ficar livre. Depois da execução e da revisão final repetiu-se, sobre o código final (numa cópia limpa com contas fictícias e uma base local nova), o essencial: «Guardar» sem editar o campo da quota (1 000 000 bytes aparecem como «0») fecha o diálogo sem enviar nenhum pedido e a quota fica igual; suspender e reativar pelo painel (a sessão antiga continua inválida depois de reativar, o login de uma conta suspensa dá `account_suspended`, o link de partilha da conta suspensa dá 404 e volta a funcionar ao reativar); apagar uma conta («A remover», sem menu, o registo com o email dá 409), e o gatilho local do cron a removê-la e a libertar o email.
