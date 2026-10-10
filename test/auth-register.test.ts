@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { registerUser, setUserStatus, type UserBody } from "./auth-helpers";
-import { api, resetDb } from "./helpers";
+import { fetchWithEnv } from "./db-helpers";
+import { api, buildRequest, resetDb } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -115,5 +116,35 @@ describe("GET /api/auth/me", () => {
     const { cookie } = await registerUser("ana@example.com");
     await setUserStatus("ana@example.com", "suspended");
     expect((await api("/api/auth/me", { cookie })).status).toBe(401);
+  });
+});
+
+describe("POST /api/auth/register com o registo fechado", () => {
+  const closed = { REGISTRATION_OPEN: "false" };
+
+  it("responde 403 `registration_closed` sem criar a conta, e quem já tem conta continua a entrar", async () => {
+    const ana = await registerUser("ana@example.com");
+
+    const res = await fetchWithEnv(
+      buildRequest("/api/auth/register", { method: "POST", json: { email: "bob@example.com", password: "senha-segura-123" } }),
+      closed,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "registration_closed" });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first()).toEqual({ n: 1 });
+
+    const login = await fetchWithEnv(
+      buildRequest("/api/auth/login", { method: "POST", json: { email: "ana@example.com", password: ana.password } }),
+      closed,
+    );
+    expect(login.status).toBe(200);
+  });
+
+  it("responde antes de olhar para o corpo (nem o PBKDF2 da senha arranca)", async () => {
+    const res = await fetchWithEnv(
+      buildRequest("/api/auth/register", { method: "POST", body: "isto não é JSON", headers: { "Content-Type": "application/json" } }),
+      closed,
+    );
+    expect(res.status).toBe(403);
   });
 });

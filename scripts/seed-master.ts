@@ -5,6 +5,7 @@
 // A senha nunca é escrita em ficheiros nem passada ao wrangler: só o hash chega à base de dados.
 import { execFileSync } from "node:child_process";
 import { hashPassword } from "../src/worker/lib/crypto.ts";
+import { migrateCommand } from "./seed-hints.ts";
 import { isValidEmail, isValidPassword, normalizeEmail } from "../src/shared/validation.ts";
 
 const DEFAULT_MASTER_QUOTA_BYTES = 10 * 1024 ** 3;
@@ -22,7 +23,7 @@ function parseTarget(args: string[]): "--local" | "--remote" {
   return flags[0] as "--local" | "--remote";
 }
 
-function d1Execute(target: string, sql: string): Array<{ results: Array<Record<string, unknown>> }> {
+function d1Execute(target: "--local" | "--remote", sql: string): Array<{ results: Array<Record<string, unknown>> }> {
   let stdout: string;
   try {
     stdout = execFileSync(
@@ -35,7 +36,7 @@ function d1Execute(target: string, sql: string): Array<{ results: Array<Record<s
     // O stderr do wrangler já foi para o terminal (stdio: inherit).
     fail(
       `O wrangler falhou ao executar a consulta (destino: ${target.slice(2)}). ` +
-        "Se a base for nova, aplique primeiro as migrações (npm run db:migrate:local).",
+        `Se a base for nova, aplique primeiro as migrações (${migrateCommand(target)}).`,
     );
   }
   const start = stdout.indexOf("[");

@@ -9,6 +9,13 @@ const HASH_BYTES = 32;
 /** Máximo aceite pelo WebCrypto do Workers em produção. O valor usado fica guardado no hash. */
 export const PBKDF2_ITERATIONS = 100_000;
 
+/**
+ * Hash de uma senha aleatória que ninguém guardou: o login de um email que não existe verifica a senha contra ele, para demorar o mesmo
+ * que o de uma conta verdadeira. É uma constante e não se calcula ao arrancar (o primeiro login falhado de cada arranque pagava dois PBKDF2).
+ * Se `PBKDF2_ITERATIONS` mudar, gerar outra: `node --input-type=module -e "import { hashPassword } from './src/worker/lib/crypto.ts'; console.log(await hashPassword(crypto.randomUUID()))"`.
+ */
+export const DUMMY_PASSWORD_HASH = "pbkdf2-sha256$100000$YqDRIeztG1fRfciEoiKX4w==$W5k+I9f7cNX1XwE1S680ChLPrMCT1HEX8HV5aP+Ru/Y=";
+
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);

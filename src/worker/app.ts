@@ -24,9 +24,15 @@ app.use("/api/*", (c, next) =>
   c.req.method === "PUT" && /^\/api\/files\/?$/.test(c.req.path) ? next() : jsonBodyLimit(c, next),
 );
 
+/** Para os monitores: 200 `{ ok: true }` com a D1 a responder, 503 `{ ok: false }` (e o erro no registo) quando não. */
 app.get("/api/health", async (c) => {
-  const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
-  return c.json({ ok: row?.ok === 1 });
+  try {
+    const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
+    if (row?.ok === 1) return c.json({ ok: true });
+  } catch (error) {
+    console.error("A verificação de saúde falhou", error);
+  }
+  return c.json({ ok: false }, 503);
 });
 
 app.route("/api/admin", admin);

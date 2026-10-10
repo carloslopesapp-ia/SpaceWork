@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DUMMY_PASSWORD_HASH,
   hashPassword,
   PBKDF2_ITERATIONS,
   randomToken,
@@ -76,5 +77,21 @@ describe("sha256Hex", () => {
     expect(await sha256Hex("abc")).toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
+  });
+});
+
+describe("DUMMY_PASSWORD_HASH", () => {
+  it("tem o formato e as iterações de um hash verdadeiro, para a verificação gastar o mesmo CPU", () => {
+    const parts = DUMMY_PASSWORD_HASH.split("$");
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe("pbkdf2-sha256");
+    // Se as iterações mudarem, a constante tem de ser gerada outra vez (ver o comentário em crypto.ts).
+    expect(parts[1]).toBe(String(PBKDF2_ITERATIONS));
+  });
+
+  it("não corresponde a nenhuma senha que um utilizador possa escolher", async () => {
+    for (const password of ["", "spacework-dummy-password", "senha-segura-123"]) {
+      expect(await verifyPassword(password, DUMMY_PASSWORD_HASH), password).toBe(false);
+    }
   });
 });

@@ -3,7 +3,7 @@ import { getCookie } from "hono/cookie";
 import { getConfig } from "../config";
 import { ApiError, isUniqueViolation } from "../errors";
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from "../lib/cookies";
-import { hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
+import { DUMMY_PASSWORD_HASH, hashPassword, sha256Hex, verifyPassword } from "../lib/crypto";
 import { readJsonObject, readString } from "../lib/http";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
 import { createSession, deleteSessionByHash, deleteUserSessionsStatement } from "../lib/sessions";
@@ -25,14 +25,11 @@ const LOCKED_OUT = [
   "Demasiadas tentativas. Tente novamente dentro de 15 minutos.",
 ] as const;
 
-// Hash de uma senha qualquer, para que um email inexistente demore o mesmo a responder que um existente.
-let dummyHash: Promise<string> | undefined;
-function getDummyHash(): Promise<string> {
-  dummyHash ??= hashPassword("spacework-dummy-password");
-  return dummyHash;
-}
-
 auth.post("/register", async (c) => {
+  const config = getConfig(c.env);
+  if (!config.registrationOpen) {
+    throw new ApiError(403, "registration_closed", "O registo está fechado. Peça uma conta ao administrador.");
+  }
   const body = await readJsonObject(c);
   const email = normalizeEmail(readString(body, "email"));
   const password = readString(body, "password");
@@ -41,7 +38,6 @@ auth.post("/register", async (c) => {
     throw new ApiError(400, "invalid_password", "A senha deve ter entre 8 e 128 caracteres.");
   }
 
-  const config = getConfig(c.env);
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
   try {
@@ -97,7 +93,7 @@ auth.post("/login", async (c) => {
   const usable = row !== null && row.status !== "deleting";
   const passwordOk = await verifyPassword(
     password,
-    usable ? row.password_hash : await getDummyHash(),
+    usable ? row.password_hash : DUMMY_PASSWORD_HASH,
   );
   if (!usable || !passwordOk) throw new ApiError(401, ...INVALID_CREDENTIALS);
 

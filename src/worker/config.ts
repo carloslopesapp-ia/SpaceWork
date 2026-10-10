@@ -3,6 +3,8 @@ export interface AppConfig {
   maxUploadBytes: number;
   trashRetentionDays: number;
   sessionTtlDays: number;
+  /** Se `false`, `POST /api/auth/register` responde 403 (o dono fecha o registo depois de criar as contas). */
+  registrationOpen: boolean;
 }
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
@@ -17,5 +19,7 @@ export function getConfig(env: Env): AppConfig {
     maxUploadBytes: toPositiveInt(env.MAX_UPLOAD_BYTES, 104_857_600),
     trashRetentionDays: toPositiveInt(env.TRASH_RETENTION_DAYS, 30),
     sessionTtlDays: toPositiveInt(env.SESSION_TTL_DAYS, 14),
+    // Sem a variável o registo está aberto (decisão do dono); com ela, só `true` o mantém aberto: um erro de escrita fecha-o.
+    registrationOpen: env.REGISTRATION_OPEN === undefined || env.REGISTRATION_OPEN === "true",
   };
 }

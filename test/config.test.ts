@@ -9,6 +9,7 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
+      registrationOpen: true,
     });
   });
 
@@ -18,12 +19,14 @@ describe("getConfig", () => {
       MAX_UPLOAD_BYTES: "10",
       TRASH_RETENTION_DAYS: "7",
       SESSION_TTL_DAYS: "1",
+      REGISTRATION_OPEN: "false",
     } as unknown as Env;
     expect(getConfig(custom)).toEqual({
       defaultQuotaBytes: 2048,
       maxUploadBytes: 10,
       trashRetentionDays: 7,
       sessionTtlDays: 1,
+      registrationOpen: false,
     });
   });
 
@@ -38,6 +41,7 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
+      registrationOpen: true,
     });
   });
 
@@ -53,6 +57,19 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
+      registrationOpen: true,
     });
+  });
+});
+
+describe("getConfig: registrationOpen", () => {
+  it("o registo está aberto sem a variável e só `true` o mantém aberto (qualquer outro valor fecha-o)", () => {
+    const open = (value: string | undefined) =>
+      getConfig({ REGISTRATION_OPEN: value } as unknown as Env).registrationOpen;
+    expect(open(undefined)).toBe(true);
+    expect(open("true")).toBe(true);
+    expect(open("false")).toBe(false);
+    expect(open("flase")).toBe(false);
+    expect(open("")).toBe(false);
   });
 });
