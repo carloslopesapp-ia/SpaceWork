@@ -83,7 +83,8 @@ export default function AdminPage() {
           <Message kind="error">{errorMessage(users.error)}</Message>
         </div>
       )}
-      <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      {/* `relative`: o texto `sr-only` da tabela (position: absolute) fica preso a este contentor e não alarga a página. */}
+      <div className="relative mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full min-w-[42rem] text-left text-sm">
           <caption className="sr-only">Contas de utilizadores</caption>
           <thead className="border-b border-slate-200 text-xs text-slate-500 uppercase">

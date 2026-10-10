@@ -91,7 +91,7 @@ export default function FolderPage() {
     >
       <Breadcrumb items={breadcrumb} />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight break-words">{folder?.name ?? ROOT_LABEL}</h1>
+        <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">{folder?.name ?? ROOT_LABEL}</h1>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setCreating(true)}>
             Nova pasta

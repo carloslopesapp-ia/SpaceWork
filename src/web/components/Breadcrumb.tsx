@@ -8,7 +8,7 @@ const CURRENT = "font-semibold text-slate-900";
 export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
   return (
     <nav aria-label="Caminho">
-      <ol className="flex flex-wrap items-center gap-1 text-sm text-slate-600">
+      <ol className="flex flex-wrap items-center gap-1 text-sm break-all text-slate-600">
         <li>
           {items.length === 0 ? (
             <span aria-current="page" className={CURRENT}>
