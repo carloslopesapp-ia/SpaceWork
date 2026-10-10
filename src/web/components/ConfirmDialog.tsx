@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Button } from "./Button";
 import { Message } from "./Message";
 import { Modal } from "./Modal";
@@ -25,10 +26,13 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const messageId = useId();
   return (
-    <Modal title={title} onClose={() => !pending && onClose()}>
+    <Modal title={title} describedBy={messageId} onClose={() => !pending && onClose()}>
       <div className="space-y-4">
-        <p className="text-sm text-slate-700">{message}</p>
+        <p id={messageId} className="text-sm text-slate-700">
+          {message}
+        </p>
         {error && <Message kind="error">{error}</Message>}
         <div className="flex justify-end gap-2">
           <Button variant="secondary" disabled={pending} onClick={onClose}>

@@ -28,6 +28,11 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Cancelar" })).toHaveFocus();
   });
 
+  it("a pergunta é a descrição do diálogo (o leitor de ecrã lê-a depois do título)", () => {
+    setup();
+    expect(screen.getByRole("dialog", { name: "Excluir pasta" })).toHaveAccessibleDescription("Excluir a pasta «Fotos»?");
+  });
+
   it("Excluir confirma e Cancelar fecha", async () => {
     const { onConfirm, onClose, user } = setup();
     await user.click(screen.getByRole("button", { name: "Excluir" }));

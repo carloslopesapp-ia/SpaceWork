@@ -6,15 +6,27 @@ interface ModalProps {
   children: ReactNode;
   /** Largo, para a pré-visualização. */
   wide?: boolean;
+  /** O `id` do texto que descreve o diálogo (`aria-describedby`): a pergunta de uma confirmação, por exemplo. */
+  describedBy?: string;
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])';
+
+// A página por baixo não rola enquanto há um diálogo aberto. Contam-se os diálogos abertos: um pode abrir-se por cima de outro.
+let openModals = 0;
+let pageOverflow = "";
+
+/** Devolve o foco a quem abriu o diálogo; se esse botão já não existe (a linha foi movida ou excluída), vai para o conteúdo da página e não para o `<body>`. */
+function restoreFocus(opener: HTMLElement | null) {
+  if (opener?.isConnected) opener.focus();
+  else document.querySelector<HTMLElement>("main")?.focus();
+}
 
 /**
  * Diálogo modal acessível: `role="dialog"` com título, foco preso lá dentro (Tab e Shift+Tab dão a volta), Esc ou clique
  * no fundo fecham, e o foco volta ao elemento que o abriu. (Não usa `<dialog>.showModal()`: o jsdom não o implementa.)
  */
-export function Modal({ title, onClose, children, wide = false }: ModalProps) {
+export function Modal({ title, onClose, children, wide = false, describedBy }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [opener] = useState(() => document.activeElement as HTMLElement | null);
@@ -25,8 +37,18 @@ export function Modal({ title, onClose, children, wide = false }: ModalProps) {
     if (!dialog.contains(document.activeElement)) {
       (dialog.querySelector<HTMLElement>(FOCUSABLE) ?? dialog).focus();
     }
-    return () => opener?.focus();
+    return () => restoreFocus(opener);
   }, [opener]);
+
+  useEffect(() => {
+    if (openModals++ === 0) {
+      pageOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      if (--openModals === 0) document.body.style.overflow = pageOverflow;
+    };
+  }, []);
 
   // Se o elemento focado desaparece (por exemplo, a linha de um link revogado), o foco cai para o <body>, onde o Esc e o Tab já não
   // chegam ao diálogo (tratam-se no `onKeyDown` do próprio diálogo): depois de cada renderização, devolve-se-lhe o foco se o perdeu.
@@ -72,6 +94,7 @@ export function Modal({ title, onClose, children, wide = false }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={describedBy}
         tabIndex={-1}
         onKeyDown={onKeyDown}
         className={`max-h-full w-full overflow-auto rounded-2xl bg-white p-6 shadow-xl outline-none ${wide ? "max-w-4xl" : "max-w-md"}`}

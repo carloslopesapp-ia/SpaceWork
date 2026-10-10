@@ -49,6 +49,23 @@ describe("NameDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("o erro de validação desaparece ao voltar a escrever (não fica a mentir sobre o que está no campo)", async () => {
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Nome da pasta"), "a/b");
+    await user.click(screen.getByRole("button", { name: "Renomear" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Nome da pasta"), "c");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("Enter no campo envia o nome normalizado", async () => {
+    const { onSubmit, user } = setup();
+    await user.type(screen.getByLabelText("Nome da pasta"), "  Férias {Enter}");
+    expect(onSubmit).toHaveBeenCalledWith("Férias");
+  });
+
   it("mostra o erro do servidor e fica ocupado enquanto grava", () => {
     setup({ error: "Já existe uma pasta com esse nome neste local.", pending: true });
     expect(screen.getByRole("alert")).toHaveTextContent("Já existe uma pasta com esse nome neste local.");

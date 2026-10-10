@@ -12,6 +12,8 @@ import { ROOT_LABEL } from "../tree";
 import { useUploadActions } from "../uploads-context";
 
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+/** Um diálogo aberto é do que está a decorrer: o que cai dentro dele não é para a zona de largar. */
+const overDialog = (event: DragEvent) => event.target instanceof Element && event.target.closest('[role="dialog"]') !== null;
 
 /** "Meu espaço": o conteúdo de uma pasta (a raiz em `/`, as outras em `/pasta/:folderId`). */
 export default function FolderPage() {
@@ -60,6 +62,7 @@ export default function FolderPage() {
   }
 
   function onDrop(event: DragEvent) {
+    if (overDialog(event)) return; // a guarda da janela (`AppLayout`) já impede o browser de abrir o ficheiro
     event.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
@@ -72,13 +75,13 @@ export default function FolderPage() {
     <div
       className={`min-h-[60vh] rounded-xl ${dragging ? "bg-indigo-50/60 outline-2 outline-dashed outline-indigo-400" : ""}`}
       onDragEnter={(event) => {
-        if (!hasFiles(event)) return;
+        if (overDialog(event) || !hasFiles(event)) return;
         event.preventDefault();
         dragDepth.current++;
         setDragging(true);
       }}
       onDragOver={(event) => {
-        if (hasFiles(event)) event.preventDefault();
+        if (hasFiles(event) && !overDialog(event)) event.preventDefault();
       }}
       onDragLeave={() => {
         if (dragDepth.current > 0 && --dragDepth.current === 0) setDragging(false);

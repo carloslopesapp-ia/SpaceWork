@@ -342,6 +342,25 @@ describe("FolderPage: envio e pré-visualização", () => {
     expect(Xhr.instances).toHaveLength(0);
   });
 
+  it("um ficheiro largado sobre um diálogo aberto não é enviado (a zona de largar não vê o que cai num diálogo)", async () => {
+    const Xhr = stubXhr();
+    serve();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Nova pasta" }));
+    const dialog = screen.getByRole("dialog", { name: "Nova pasta" });
+    const dataTransfer = {
+      types: ["Files"],
+      items: [{ kind: "file", getAsFile: () => new File(["x"], "solta.png"), webkitGetAsEntry: () => ({ isDirectory: false }) }],
+    };
+
+    fireEvent.dragEnter(dialog, { dataTransfer });
+    fireEvent.drop(dialog, { dataTransfer });
+
+    expect(Xhr.instances).toHaveLength(0);
+    expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
+  });
+
   it("um ficheiro acima do limite do servidor nem é enviado", async () => {
     const Xhr = stubXhr();
     serve({ "GET /api/config": () => json({ maxUploadBytes: 5 }) });

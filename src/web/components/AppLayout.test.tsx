@@ -253,3 +253,12 @@ describe("AppLayout: «Sair» com envios em curso", () => {
     expect(server.callsTo("POST /api/auth/logout")).toHaveLength(1);
   });
 });
+
+describe("AppLayout: o conteúdo da página", () => {
+  it("aceita o foco por programa (é para onde vai o foco quando o botão que abriu um diálogo desaparece)", async () => {
+    mockApi({ ...CONTENTS, "GET /api/auth/me": () => json({ user: ME }) });
+    renderApp("/");
+    await screen.findByRole("navigation", { name: "Principal" });
+    expect(screen.getByRole("main")).toHaveAttribute("tabindex", "-1");
+  });
+});

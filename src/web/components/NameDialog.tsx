@@ -51,7 +51,10 @@ export function NameDialog({
           autoFocus
           autoComplete="off"
           onFocus={(event) => event.currentTarget.select()}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setLocalError(null);
+          }}
         />
         {shownError && <Message kind="error">{shownError}</Message>}
         <div className="flex justify-end gap-2">
