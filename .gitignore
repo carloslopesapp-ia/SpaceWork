@@ -14,5 +14,6 @@ dist
 # Testes
 playwright-report/
 test-results/
+.e2e-state/
 
 .DS_Store

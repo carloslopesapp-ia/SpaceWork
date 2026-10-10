@@ -4,5 +4,6 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cloudflare()],
+  // `E2E_STATE` (só nos testes de ponta a ponta) manda guardar a D1 e o R2 simulados noutra pasta, para não mexerem na `.wrangler` de desenvolvimento.
+  plugins: [react(), tailwindcss(), cloudflare({ persistState: process.env.E2E_STATE ? { path: process.env.E2E_STATE } : true })],
 });
