@@ -70,6 +70,11 @@ test("«Sair» com um envio a decorrer pergunta antes: «Cancelar» mantém a se
 
 test("um ficheiro largado sobre um diálogo aberto não é enviado", async ({ page }) => {
   await signUp(page);
+  // Conta os envios (`PUT /api/files?...`) desde já: uma negativa logo a seguir ao largar podia passar antes de o envio começar.
+  let uploads = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && request.url().includes("/api/files?")) uploads++;
+  });
   await page.getByRole("button", { name: "Nova pasta" }).click();
   const dialog = page.getByRole("dialog", { name: "Nova pasta" });
   const dataTransfer = await page.evaluateHandle(() => {
@@ -80,8 +85,10 @@ test("um ficheiro largado sobre um diálogo aberto não é enviado", async ({ pa
 
   await dialog.dispatchEvent("dragenter", { dataTransfer });
   await dialog.dispatchEvent("drop", { dataTransfer });
-  await page.getByRole("button", { name: "Cancelar" }).click();
+  await dialog.getByRole("button", { name: "Cancelar" }).click(); // no diálogo: «Cancelar o envio de…» também casaria, se o envio começasse
 
-  await expect(page.getByRole("button", { name: "Ações para o ficheiro largado.txt" })).toHaveCount(0);
+  // Uma ida completa ao servidor dá tempo a uma guarda avariada de começar o envio; só depois se verifica que não houve nenhum.
   await createFolder(page, "Fotos"); // a aplicação continua a responder
+  expect(uploads).toBe(0);
+  await expect(page.getByRole("button", { name: "Ações para o ficheiro largado.txt" })).toHaveCount(0);
 });

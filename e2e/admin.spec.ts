@@ -101,9 +101,16 @@ test("o administrador não vê os ficheiros de outras contas (nem na lista, nem 
   await upload(ana, "segredo.txt", "só da ana");
 
   await admin.goto("/");
+  // Primeiro espera-se pela lista (a raiz do administrador está vazia): sem isto, os «0» abaixo passavam durante o «A carregar…».
+  await expect(admin.getByRole("heading", { name: "Meu espaço" })).toBeVisible();
+  await expect(admin.getByText("Esta pasta está vazia.")).toBeVisible();
   await expect(admin.getByRole("button", { name: "Ações para o ficheiro segredo.txt" })).toHaveCount(0);
   await expect(admin.getByText("segredo.txt")).toHaveCount(0);
-  // Nem há rota para o admin ir buscar o ficheiro de outra conta.
+  // Nem há rota para o admin ir buscar o ficheiro de outra conta. O controlo: a pesquisa da própria Ana encontra-o.
+  const anaSearch = await ana.request.get("/api/search?q=segredo");
+  const anaResults = (await anaSearch.json()) as { results: { kind: string; file: { name: string } }[] };
+  expect(anaResults.results).toHaveLength(1);
+  expect(anaResults.results[0]).toMatchObject({ kind: "file", file: { name: "segredo.txt" } });
   const search = await admin.request.get("/api/search?q=segredo");
   expect(await search.json()).toEqual({ results: [] });
   expect((await request.get("/api/admin/users")).status()).toBe(401); // sem sessão
