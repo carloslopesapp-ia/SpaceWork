@@ -10,7 +10,8 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 3A | [API da lixeira, pesquisa e partilha](2026-10-03-03a-api-lixeira-pesquisa-partilha.md) | Lixeira (listar, restaurar com sufixo, eliminar de vez, esvaziar), pesquisa por nome com o caminho de cada resultado, links de partilha (criar com validade, listar, revogar) e as rotas públicas de nome, tamanho e descarregamento | Concluído |
 | 3B | [Interface da lixeira, pesquisa e partilha](2026-10-03-03b-interface-lixeira-pesquisa-partilha.md) | Ecrã `/lixeira` (restaurar, eliminar de vez, esvaziar), caixa de pesquisa com os resultados e o caminho de cada um, diálogo «Partilhar» (criar links com validade, copiar, revogar), página pública `/s/:token`; fila de envios com um refresh agrupado e aviso ao sair | Concluído |
 | 4 | [Admin e manutenção](2026-10-05-04-admin-e-manutencao.md) | API e painel de utilizadores (quotas, suspender e reativar, apagar contas) e o cron de manutenção por hora (lixeira expirada, envios pendentes, contas em remoção, sessões, falhas de login e partilhas velhas) | Concluído |
-| 5 | Deploy e testes de ponta a ponta | Recursos na Cloudflare, `wrangler deploy`, teste Playwright de fumo, medição de CPU do PBKDF2 | Por escrever |
+| 5A | [Endurecimento e testes de ponta a ponta](2026-10-05-05a-endurecimento-e-testes-e2e.md) | Cabeçalhos de segurança (CSP), registos sem tokens, o cron com falha visível, `REGISTRATION_OPEN`, a passagem de acessibilidade dos diálogos e menus, e a suíte Playwright (fumo, envios, partilha, admin, teclado) contra a aplicação construída | Escrito, por executar |
+| 5B | Deploy | Recursos na Cloudflare (D1, R2), `wrangler deploy`, o master em produção, as medições na Cloudflare (CPU do PBKDF2 e do cron, subpedidos, limite do corpo, `waitUntil`) | Por escrever |
 
 ## Factos verificados que os planos seguintes devem respeitar
 
