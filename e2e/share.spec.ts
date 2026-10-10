@@ -63,6 +63,10 @@ test("um link que nunca existiu mostra o mesmo aviso que um revogado", async ({ 
 });
 
 test("sem permissão para a área de transferência, «Copiar» seleciona o link e explica como o copiar à mão", async ({ page }) => {
+  // O browser decide sozinho se deixa copiar (o Chromium sem interface recusa, o Chrome com interface aceita): aqui a recusa é forçada.
+  await page.addInitScript(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new DOMException("Sem permissão", "NotAllowedError"));
+  });
   await signUp(page);
   await upload(page, "nota.txt", "olá");
   await chooseAction(page, "Ações para o ficheiro nota.txt", "Partilhar…");
