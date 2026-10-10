@@ -87,6 +87,10 @@ describe("DUMMY_PASSWORD_HASH", () => {
     expect(parts[0]).toBe("pbkdf2-sha256");
     // Se as iterações mudarem, a constante tem de ser gerada outra vez (ver o comentário em crypto.ts).
     expect(parts[1]).toBe(String(PBKDF2_ITERATIONS));
+    // O `verifyPassword` devolve false logo à entrada se o salt ou o hash estiverem malformados, e isso saltaria em silêncio o PBKDF2
+    // para os emails que não existem: o salt e o hash fictícios têm de ter o mesmo tamanho dos verdadeiros.
+    expect(atob(parts[2])).toHaveLength(16);
+    expect(atob(parts[3])).toHaveLength(32);
   });
 
   it("não corresponde a nenhuma senha que um utilizador possa escolher", async () => {

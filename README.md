@@ -135,7 +135,7 @@ curl -X POST "http://localhost:5173/cdn-cgi/local/explorer/api/local/scheduled?w
 
 Em produção os erros de cada execução ficam nos registos do Worker (`wrangler tail` ou o painel da Cloudflare).
 
-O cron falha à vista: se um passo falhou, o gatilho `scheduled` rejeita e a execução fica marcada como falhada. Cada execução escreve o relatório numa linha JSON (`{"evento":"manutencao", ...}`) no registo do Worker.
+O cron falha à vista: se um passo falhou, o gatilho `scheduled` rejeita, para a execução aparecer como falhada no painel da Cloudflare (a confirmar em produção). Cada execução escreve o relatório numa linha JSON (`{"evento":"manutencao", ...}`) no registo do Worker.
 
 ## Configuração
 

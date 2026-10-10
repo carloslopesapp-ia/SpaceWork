@@ -35,11 +35,25 @@ describe("a casca da aplicação", () => {
     expect(csp).not.toContain("unsafe-inline");
     expect(csp).not.toContain("unsafe-eval");
     expect(directives["connect-src"]).toEqual(["'self'"]);
+    expect(directives["img-src"]).toEqual(["'self'"]);
     expect(directives["frame-src"]).toEqual(["'self'"]);
     expect(directives["form-action"]).toEqual(["'self'"]);
     expect(directives["frame-ancestors"]).toEqual(["'self'"]);
     expect(directives["object-src"]).toEqual(["'none'"]);
     expect(directives["base-uri"]).toEqual(["'none'"]);
+    // O conjunto de diretivas é fixo: uma diretiva nova (ou mais larga) tem de ser uma decisão, não um acidente.
+    expect(Object.keys(directives).sort()).toEqual([
+      "base-uri",
+      "connect-src",
+      "default-src",
+      "form-action",
+      "frame-ancestors",
+      "frame-src",
+      "img-src",
+      "object-src",
+      "script-src",
+      "style-src",
+    ]);
     expect(csp, "CSP").not.toMatch(EXTERNAL);
   });
 });

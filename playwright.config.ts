@@ -20,10 +20,12 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
+    // A construção vem antes das migrações: o wrangler segue o `.wrangler/deploy/config.json` até ao `dist/`, que a construção recria; com o
+    // `dist/` apagado e o ficheiro de redirecionamento ainda lá, migrar primeiro falha.
     command: [
       `rm -rf ${STATE_DIR}`,
-      `E2E_STATE=${STATE_DIR} npx wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR}`,
       "npm run build",
+      `npx wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR}`,
       `E2E_STATE=${STATE_DIR} npx vite preview --port ${PORT} --strictPort`,
     ].join(" && "),
     url: `${ORIGIN}/api/health`,

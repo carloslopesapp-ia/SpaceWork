@@ -82,7 +82,7 @@ IDs: `crypto.randomUUID()` (texto). Datas: inteiros (milissegundos Unix). As cha
 ### Registo e login
 
 - Email normalizado (trim + minúsculas, máx. 254 caracteres). Senha de 8 a 128 caracteres.
-- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` diferente de `true` (por defeito é `true`) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
 - O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta está suspensa (403). Contas `deleting` tratam-se como inexistentes.
 - Bloqueio: com 5 ou mais falhas do mesmo email nos últimos 15 minutos, o login é recusado (429). Uma entrada bem-sucedida apaga as falhas desse email. (Compromisso aceite: alguém pode bloquear o login de um email alheio durante 15 minutos.)
 

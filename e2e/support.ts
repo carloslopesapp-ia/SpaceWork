@@ -21,7 +21,11 @@ export async function signUp(page: Page, email = uniqueEmail("ana")): Promise<st
 
 /** Corre uma instrução SQL na base de dados de teste (a de `.e2e-state`): para o que a interface não faz, como promover um administrador. */
 export function sql(command: string): void {
-  execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", STATE_DIR, "--command", command], { stdio: "ignore" });
+  execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", STATE_DIR, "--command", command], {
+    // O stderr do wrangler fica no erro lançado (em vez de se perder) e o limite evita que um wrangler pendurado prenda o teste.
+    stdio: ["ignore", "ignore", "pipe"],
+    timeout: 60_000,
+  });
 }
 
 /** Cria a pasta pelo diálogo «Nova pasta». */
