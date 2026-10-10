@@ -149,7 +149,7 @@ As variáveis estão em `wrangler.jsonc` (`vars`) e são sempre texto:
 | `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
 | `REGISTRATION_OPEN` | `true` | Só `true` mantém o registo aberto; qualquer outro valor (por exemplo `false`) fecha-o |
 
-**Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`, e as respostas de ficheiros a sua própria CSP. O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
+**Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
 
 ## Testes de ponta a ponta
 
