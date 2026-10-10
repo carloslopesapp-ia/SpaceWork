@@ -36,6 +36,7 @@ Bindings: `DB` (D1), `FILES` (R2). Variáveis de configuração:
 | `MAX_UPLOAD_BYTES` | 104857600 (100 MiB) |
 | `TRASH_RETENTION_DAYS` | 30 |
 | `SESSION_TTL_DAYS` | 14 |
+| `REGISTRATION_OPEN` | true |
 
 Mesma origem para frontend e API: não há CORS e os cookies de sessão são simples.
 
@@ -81,8 +82,8 @@ IDs: `crypto.randomUUID()` (texto). Datas: inteiros (milissegundos Unix). As cha
 ### Registo e login
 
 - Email normalizado (trim + minúsculas, máx. 254 caracteres). Senha de 8 a 128 caracteres.
-- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1).
-- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa", para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta está suspensa (403). Contas `deleting` tratam-se como inexistentes.
+- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` diferente de `true` (por defeito é `true`) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta está suspensa (403). Contas `deleting` tratam-se como inexistentes.
 - Bloqueio: com 5 ou mais falhas do mesmo email nos últimos 15 minutos, o login é recusado (429). Uma entrada bem-sucedida apaga as falhas desse email. (Compromisso aceite: alguém pode bloquear o login de um email alheio durante 15 minutos.)
 
 ### Senhas
@@ -210,7 +211,7 @@ docs/superpowers/     specs e planos
 
 - **Integração da API** (Vitest no runtime Workers, D1 e R2 locais): quotas e concorrência (uploads simultâneos que juntos excedem a quota), isolamento entre utilizadores, nomes únicos, mover sem ciclos, regra de pasta vazia, lixeira e restauro com conflito de nome, expiração e revogação de partilhas, permissões de admin, bloqueio de login, proteção de `Origin`.
 - **Unitários**: hash de senhas, normalização e validação de nomes.
-- **E2E de fumo** (Playwright): registo, login, criar pasta, carregar, mover, excluir, restaurar.
+- **Ponta a ponta** (Playwright, Chromium, contra a aplicação construída com `vite preview`, D1 e R2 simulados em `.e2e-state`): o fumo (registo, login, criar pasta, carregar, mover, excluir, restaurar), os envios (o `Content-Length` do browser, arrastar e largar, a quota), a pré-visualização, a partilha (copiar, a página pública sem sessão, o descarregamento como anexo, a revogação), a CSP em vigor, o painel do administrador, o teclado e o foco, «Sair» com envios e o ecrã de um telemóvel.
 
 ## 11. Deploy
 
@@ -239,3 +240,5 @@ Recuperação de senha por email (e, por isso, o admin **não** consegue repor a
 1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. Não é medível em local. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês). O valor de 100 000 como teto de iterações do WebCrypto do Workers também só se confirma em produção.
 2. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
 3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação; o desenho do Plano 4 gasta 32 no pior caso: confirmar em produção que a contagem é a esperada e que o gatilho de hora a hora corre).
+4. O gatilho do cron devolve a promessa da manutenção (`async scheduled`): confirmar no painel da Cloudflare que uma execução com erro aparece como falhada, e medir o CPU da pior execução (4 páginas de 1000 objetos do R2 e 450 ids) contra os 10 ms do plano gratuito.
+5. O `observability` está ligado sem os registos de invocação (o token de um link de partilha vai no caminho do URL): confirmar que os registos mostram o relatório do cron e os erros e que não mostram URLs.

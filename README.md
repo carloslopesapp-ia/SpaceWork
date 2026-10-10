@@ -30,7 +30,7 @@ npm run seed:master -- --local        # --remote para a base de dados de produç
 unset MASTER_PASSWORD
 ```
 
-(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor).
+(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor). O `--remote` só funciona depois de a D1 de produção existir: o `database_id` do `wrangler.jsonc` é provisório (o deploy é o Plano 5B).
 
 ## Comandos
 
@@ -39,6 +39,7 @@ unset MASTER_PASSWORD
 | `npm test` | Todos os testes (`test:worker` e `test:web`) |
 | `npm run test:worker` | Testes da API (Vitest no runtime do Workers, com D1 e R2 locais) |
 | `npm run test:web` | Testes da interface (Vitest em jsdom, com o Testing Library) |
+| `npm run test:e2e` | Testes de ponta a ponta (Playwright) contra a aplicação construída; ver «Testes de ponta a ponta» |
 | `npm run typecheck` | Verifica os tipos de todo o projeto (`tsc -b`) |
 | `npm run build` | Build de produção em `dist/` |
 | `npm run cf-typegen` | Regenera `worker-configuration.d.ts` (depois de alterar `wrangler.jsonc`) |
@@ -53,6 +54,7 @@ src/worker/    API (Hono): rotas, lib, middleware
 src/web/       SPA React
 src/shared/    tipos e funções partilhadas
 test/          testes do Worker (os da interface ficam ao lado do código, em src/web/**/*.test.{ts,tsx})
+e2e/           testes de ponta a ponta (Playwright)
 ```
 
 ## API
@@ -92,6 +94,8 @@ Um link só funciona se não foi revogado nem expirou, o ficheiro está fora da 
 
 As rotas `/api/admin/*` exigem também `role = admin` (senão 403 `forbidden`) e só gerem contas e quotas: **não há nenhuma rota para ver ou descarregar os ficheiros de outros utilizadores**, e o admin não consegue repor a senha de ninguém.
 
+O registo pode fechar-se com a variável `REGISTRATION_OPEN` (ver «Configuração»): fechado, `POST /api/auth/register` responde `403 registration_closed` e quem já tem conta continua a entrar. `GET /api/health` responde `200 { "ok": true }` ou, com a D1 em baixo, `503 { "ok": false }`.
+
 ## Interface
 
 Depois do login, «Meu espaço» (`/`, e `/pasta/:id` dentro de uma pasta) mostra o caminho, as pastas e os ficheiros. Tem «Nova pasta», «Carregar ficheiros» (ou arrastar ficheiros para a página) e, em cada linha, o menu «⋮»: o das pastas tem renomear, mover e excluir; o dos ficheiros tem também pré-visualizar (imagens e PDF) e descarregar. Os envios correm até 3 em paralelo, com progresso, e continuam se mudar de pasta; um ficheiro acima de `maxUploadBytes` nem sai do browser. Não há miniaturas (a API responde com `no-store`, por isso cada miniatura seria um pedido novo a cada listagem).
@@ -130,3 +134,30 @@ curl -X POST "http://localhost:5173/cdn-cgi/local/explorer/api/local/scheduled?w
 ```
 
 Em produção os erros de cada execução ficam nos registos do Worker (`wrangler tail` ou o painel da Cloudflare).
+
+O cron falha à vista: se um passo falhou, o gatilho `scheduled` rejeita e a execução fica marcada como falhada. Cada execução escreve o relatório numa linha JSON (`{"evento":"manutencao", ...}`) no registo do Worker.
+
+## Configuração
+
+As variáveis estão em `wrangler.jsonc` (`vars`) e são sempre texto:
+
+| Variável | Por defeito | O que faz |
+|---|---|---|
+| `DEFAULT_QUOTA_BYTES` | `1073741824` (1 GiB) | Quota de uma conta nova |
+| `MAX_UPLOAD_BYTES` | `104857600` (100 MiB) | Tamanho máximo de um ficheiro |
+| `TRASH_RETENTION_DAYS` | `30` | Dias na lixeira antes de o cron eliminar o ficheiro |
+| `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
+| `REGISTRATION_OPEN` | `true` | Só `true` mantém o registo aberto; qualquer outro valor (por exemplo `false`) fecha-o |
+
+**Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`, e as respostas de ficheiros a sua própria CSP. O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
+
+## Testes de ponta a ponta
+
+Correm num browser real contra a aplicação **construída** (`vite build` e `vite preview`: o Worker no workerd, com os assets estáticos e o `public/_headers` como em produção), com a D1 e o R2 simulados em `.e2e-state` (nunca a `.wrangler` de desenvolvimento), que começam vazios em cada execução. Usam a porta 4180.
+
+```bash
+npx playwright install chromium   # só da primeira vez (cerca de 100 MB)
+npm run test:e2e
+```
+
+`E2E_CHANNEL=chrome npm run test:e2e` usa o Google Chrome instalado em vez do Chromium do Playwright, `npx playwright test --headed` mostra o browser e `npx playwright show-trace test-results/<teste>/trace.zip` abre o registo de um teste que falhou.
