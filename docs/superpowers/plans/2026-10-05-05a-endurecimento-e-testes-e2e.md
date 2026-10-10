@@ -16,9 +16,9 @@ Valores da especificação e dos planos anteriores; todas as tarefas os cumprem 
 
 - Interface em português europeu; as mensagens de erro da API já vêm em português e a interface mostra o `message` tal como vem.
 - O registo continua **aberto por defeito**. `REGISTRATION_OPEN` só o mantém aberto com o valor `true` (sem a variável também está aberto); qualquer outro valor fecha-o: `403 registration_closed`, antes de gastar o PBKDF2 da senha. O login de quem já tem conta não muda.
-- A CSP das páginas (`public/_headers`) só deixa carregar e contactar a própria origem e **não usa `unsafe-inline` nem `unsafe-eval`**. A API não leva CSP; as respostas de ficheiros levam a sua (a imagem, `default-src 'none'; sandbox`; o PDF não pode ter, o leitor do browser não funciona com ela).
+- A CSP das páginas (`public/_headers`) só deixa carregar (as imagens também, sem `data:`) e contactar a própria origem e **não usa `unsafe-inline` nem `unsafe-eval`**. A API não leva CSP; as respostas de ficheiros levam a sua (a imagem, `default-src 'none'; sandbox`; o PDF não pode ter, o leitor do browser não funciona com ela).
 - O `observability` está ligado **sem os registos de invocação** (`logs.invocation_logs: false`): o token de um link de partilha vai no caminho do URL e não pode ficar nos registos. O relatório do cron e os erros (`console.log`, `console.error`) continuam a ir para lá.
-- O cron: o `scheduled` **devolve** a promessa da manutenção (se um passo falhou, rejeita e a execução fica marcada como falhada); o relatório escreve-se numa linha JSON (`evento: "manutencao"`); os limites do Plano 4 (50 subpedidos, 32 no pior caso) não mudam.
+- O cron: o `scheduled` **devolve** a promessa da manutenção (se um passo falhou, rejeita, para a execução aparecer como falhada no painel da Cloudflare: a confirmar em produção, no 5B); o relatório escreve-se numa linha JSON (`evento: "manutencao"`); os limites do Plano 4 (50 subpedidos, 32 no pior caso) não mudam.
 - Os testes de ponta a ponta correm a aplicação construída na porta **4180**, com a D1 e o R2 em `.e2e-state`; **nunca tocam na `.wrangler` de desenvolvimento**. Partilham um só servidor e correm um de cada vez, por isso cada teste usa contas e nomes que mais ninguém usa (`uniqueEmail`). As contas são fictícias (`*@example.test`) e a senha, inventada e fixa, só existe nos testes.
 - Os testes de ponta a ponta escrevem-se **depois** do código que testam: uma falha é um defeito encontrado. Só o teste do telemóvel (Task 8) começa «vermelho», porque a correção vem no mesmo passo.
 - Os testes do Worker (`npx vitest run`), os da interface (`npx vitest run -c vitest.web.config.ts`) e os de ponta a ponta (`npm run test:e2e`) mostram só o resumo: qualquer outra saída (avisos de `act`, `console.error`, o registo do cron) é um defeito do teste a corrigir. Nenhum teste espera por temporizadores falsos.
@@ -271,7 +271,7 @@ Expected: `Test Files  2 passed (2)`, `Tests  17 passed (17)`.
 
 - [ ] **Step 2: O hash fictício do login é uma constante (testes primeiro)**
 
-Um email que não existe gasta o mesmo tempo de CPU que um que existe porque o login verifica a senha contra um hash qualquer. Esse hash era calculado na primeira vez que fazia falta, ou seja, **o primeiro login falhado depois de cada arranque do Worker pagava dois PBKDF2** (o do hash e o da verificação), e no plano gratuito (10 ms de CPU) isso pode estourar. Passa a ser uma constante pré-calculada, de uma senha aleatória que foi deitada fora: a verificação custa o mesmo que a de uma conta verdadeira (as iterações são as de `PBKDF2_ITERATIONS`) e não há nada para calcular ao arrancar.
+Um email que não existe gasta o mesmo tempo de CPU que um que existe porque o login verifica a senha contra um hash qualquer. Esse hash era calculado na primeira vez que fazia falta, ou seja, **o primeiro login falhado depois de cada arranque do Worker pagava dois PBKDF2** (o do hash e o da verificação), e no plano gratuito (10 ms de CPU) isso pode estourar. Passa a ser uma constante pré-calculada, de uma senha aleatória que foi deitada fora: a verificação custa o mesmo que a de uma conta verdadeira (as iterações são as de `PBKDF2_ITERATIONS`) e não há nada para calcular ao arrancar. O teste confere também o **tamanho** do salt (16 bytes) e do hash (32 bytes): uma constante malformada faria o `verifyPassword` devolver `false` à entrada, sem gastar o PBKDF2, e o login de um email que não existe voltava a ser mais rápido que o de um que existe.
 
 Em `test/crypto.test.ts`, nos `import`, trocar:
 
@@ -300,6 +300,10 @@ describe("DUMMY_PASSWORD_HASH", () => {
     expect(parts[0]).toBe("pbkdf2-sha256");
     // Se as iterações mudarem, a constante tem de ser gerada outra vez (ver o comentário em crypto.ts).
     expect(parts[1]).toBe(String(PBKDF2_ITERATIONS));
+    // O `verifyPassword` devolve false logo à entrada se o salt ou o hash estiverem malformados, e isso saltaria em silêncio o PBKDF2
+    // para os emails que não existem: o salt e o hash fictícios têm de ter o mesmo tamanho dos verdadeiros.
+    expect(atob(parts[2])).toHaveLength(16);
+    expect(atob(parts[3])).toHaveLength(32);
   });
 
   it("não corresponde a nenhuma senha que um utilizador possa escolher", async () => {
@@ -790,7 +794,7 @@ git commit -m "Faz o cron falhar à vista e conta bem: o gatilho devolve a prome
 
 - [ ] **Step 1: A política de segurança de conteúdo (testes primeiro)**
 
-As respostas da API já levam `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e `Cache-Control: no-store`; as páginas da aplicação (os assets estáticos, servidos antes de o Worker correr) levam as três primeiras pelo `public/_headers`. Falta o `Content-Security-Policy`, a defesa principal contra um XSS: os scripts só podem vir da própria origem (nada inline, nada de `eval`), não há `<object>`, o `<base>` está proibido e a página não se deixa pôr numa `<iframe>` de outra origem. Os formulários e os pedidos (`fetch`, XHR) só vão para a própria origem, e as `<iframe>` só carregam a própria origem (a pré-visualização de um PDF). As folhas de estilo só vêm da própria origem. As barras de progresso mudam a largura pelo CSSOM (`element.style.width = …`, que é o que o React faz), e a CSP não bloqueia isso: nenhuma diretiva precisa de `'unsafe-inline'`. A API não leva CSP: as respostas de pré-visualização e de descarregamento já têm as suas (a de uma imagem é `default-src 'none'; sandbox`; a de um PDF não pode ter, o leitor do browser não funciona com ela). O teste lê o próprio `_headers`; a Task 7 confirma num browser real que a aplicação inteira corre sem uma única violação.
+As respostas da API já levam `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e `Cache-Control: no-store`; as páginas da aplicação (os assets estáticos, servidos antes de o Worker correr) levam as três primeiras pelo `public/_headers`. Falta o `Content-Security-Policy`, a defesa principal contra um XSS: os scripts só podem vir da própria origem (nada inline, nada de `eval`), não há `<object>`, o `<base>` está proibido e a página não se deixa pôr numa `<iframe>` de outra origem. Os formulários e os pedidos (`fetch`, XHR) só vão para a própria origem, e as `<iframe>` só carregam a própria origem (a pré-visualização de um PDF). As imagens (a pré-visualização de uma imagem é um pedido à própria API) também só da própria origem, nem `data:`: nada na aplicação usa um URI `data:`, e um teste de ponta a ponta (Task 7) percorre a aplicação inteira sem violações. As folhas de estilo só vêm da própria origem. As barras de progresso mudam a largura pelo CSSOM (`element.style.width = …`, que é o que o React faz), e a CSP não bloqueia isso: nenhuma diretiva precisa de `'unsafe-inline'`. A API não leva CSP: as respostas de pré-visualização e de descarregamento já têm as suas (a de uma imagem é `default-src 'none'; sandbox`; a de um PDF não pode ter, o leitor do browser não funciona com ela). O teste lê o próprio `_headers`, confere cada diretiva e fixa o **conjunto** de diretivas (uma diretiva nova, ou mais larga, tem de ser uma decisão e não um acidente); a Task 7 confirma num browser real que a aplicação inteira corre sem uma única violação.
 
 Em `src/web/shell.test.ts`, trocar:
 
@@ -824,11 +828,25 @@ por:
     expect(csp).not.toContain("unsafe-inline");
     expect(csp).not.toContain("unsafe-eval");
     expect(directives["connect-src"]).toEqual(["'self'"]);
+    expect(directives["img-src"]).toEqual(["'self'"]);
     expect(directives["frame-src"]).toEqual(["'self'"]);
     expect(directives["form-action"]).toEqual(["'self'"]);
     expect(directives["frame-ancestors"]).toEqual(["'self'"]);
     expect(directives["object-src"]).toEqual(["'none'"]);
     expect(directives["base-uri"]).toEqual(["'none'"]);
+    // O conjunto de diretivas é fixo: uma diretiva nova (ou mais larga) tem de ser uma decisão, não um acidente.
+    expect(Object.keys(directives).sort()).toEqual([
+      "base-uri",
+      "connect-src",
+      "default-src",
+      "form-action",
+      "frame-ancestors",
+      "frame-src",
+      "img-src",
+      "object-src",
+      "script-src",
+      "style-src",
+    ]);
     expect(csp, "CSP").not.toMatch(EXTERNAL);
   });
 ```
@@ -846,7 +864,7 @@ por:
 
 ```
   Referrer-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/shell.test.ts`
@@ -1270,7 +1288,7 @@ Expected: `Test Files  1 passed (1)`, `Tests  8 passed (8)`.
 
 - [ ] **Step 4: Largar ficheiros sobre um diálogo não os envia (testes primeiro)**
 
-A zona de largar é a página inteira, e os diálogos são filhos dela na árvore do React: um ficheiro largado sobre o diálogo «Nova pasta» subia pela árvore e era enviado, e o que se largava sobre um diálogo ficava «engolido». Um diálogo aberto é do que está a decorrer: a zona de largar ignora tudo o que cai dentro de um `role="dialog"` (a guarda da janela, em `AppLayout`, continua a impedir que o browser abra o ficheiro).
+A zona de largar é a página inteira, e os diálogos são filhos dela na árvore do React: um ficheiro largado sobre o diálogo «Nova pasta» subia pela árvore e era enviado, e a zona de largar acendia-se por baixo do diálogo. Um diálogo aberto é do que está a decorrer: enquanto houver um (`role="dialog"` com `aria-modal`), a zona de largar ignora tudo o que se larga, e a guarda da janela (em `AppLayout`) continua a impedir que o browser abra o ficheiro. A guarda **não olha ao alvo do evento**: o fundo escurecido do diálogo (`Modal`) é irmão da caixa do diálogo e cobre o ecrã todo, por isso um ficheiro largado no fundo, fora da caixa, também não pode ser enviado (o segundo teste larga no fundo e na caixa).
 
 Em `src/web/pages/FolderPage.test.tsx`, no grupo dos envios, trocar:
 
@@ -1300,11 +1318,34 @@ por:
     expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
   });
 
+  it("um diálogo aberto fica com tudo o que se larga, também no fundo (o fundo cobre o ecrã todo)", async () => {
+    const Xhr = stubXhr();
+    serve();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Nova pasta" }));
+    const dialog = screen.getByRole("dialog", { name: "Nova pasta" });
+    const backdrop = dialog.parentElement!;
+    const dataTransfer = {
+      types: ["Files"],
+      items: [{ kind: "file", getAsFile: () => new File(["x"], "solta.png"), webkitGetAsEntry: () => ({ isDirectory: false }) }],
+    };
+
+    fireEvent.dragEnter(backdrop, { dataTransfer });
+    expect(document.querySelector(".outline-dashed")).toBeNull(); // a zona de largar não se acende
+    // `fireEvent` devolve `false` quando alguém chamou `preventDefault`: é a guarda da janela (`AppLayout`) a impedir o browser de abrir o ficheiro.
+    expect(fireEvent.drop(backdrop, { dataTransfer })).toBe(false);
+    expect(fireEvent.drop(dialog, { dataTransfer })).toBe(false);
+
+    expect(Xhr.instances).toHaveLength(0);
+    expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
+  });
+
   it("um ficheiro acima do limite do servidor nem é enviado", async () => {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/FolderPage.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  1 failed | 21 passed (22)).
+Expected: FAIL (Test Files  1 failed (1); Tests  2 failed | 21 passed (23)).
 
 Em `src/web/pages/FolderPage.tsx`, a seguir a `hasFiles`, trocar:
 
@@ -1316,8 +1357,8 @@ por:
 
 ```tsx
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
-/** Um diálogo aberto é do que está a decorrer: o que cai dentro dele não é para a zona de largar. */
-const overDialog = (event: DragEvent) => event.target instanceof Element && event.target.closest('[role="dialog"]') !== null;
+/** Um diálogo aberto é do que está a decorrer: enquanto houver um, o que se larga não é para a zona de largar (o fundo do diálogo cobre o ecrã todo, por isso não basta olhar ao alvo do evento). */
+const dialogOpen = () => document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
 ```
 
 Em `onDrop`, trocar:
@@ -1331,7 +1372,7 @@ por:
 
 ```tsx
   function onDrop(event: DragEvent) {
-    if (overDialog(event)) return; // a guarda da janela (`AppLayout`) já impede o browser de abrir o ficheiro
+    if (dialogOpen()) return; // a guarda da janela (`AppLayout`) já impede o browser de abrir o ficheiro
     event.preventDefault();
 ```
 
@@ -1346,7 +1387,7 @@ por:
 
 ```tsx
       onDragEnter={(event) => {
-        if (overDialog(event) || !hasFiles(event)) return;
+        if (dialogOpen() || !hasFiles(event)) return;
 ```
 
 Em `onDragOver`, trocar:
@@ -1358,16 +1399,16 @@ Em `onDragOver`, trocar:
 por:
 
 ```tsx
-        if (hasFiles(event) && !overDialog(event)) event.preventDefault();
+        if (hasFiles(event) && !dialogOpen()) event.preventDefault();
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/pages/FolderPage.test.tsx`
-Expected: `Test Files  1 passed (1)`, `Tests  22 passed (22)`.
+Expected: `Test Files  1 passed (1)`, `Tests  23 passed (23)`.
 
 - [ ] **Step 5: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  34 passed (34)`, `Tests  276 passed (276)`.
+Expected: `Test Files  34 passed (34)`, `Tests  277 passed (277)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -1822,7 +1863,7 @@ Expected: `Test Files  2 passed (2)`, `Tests  19 passed (19)`.
 - [ ] **Step 4: Verificação e commit**
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  36 passed (36)`, `Tests  283 passed (283)`.
+Expected: `Test Files  36 passed (36)`, `Tests  284 passed (284)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -1891,10 +1932,12 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
+    // A construção vem antes das migrações: o wrangler segue o `.wrangler/deploy/config.json` até ao `dist/`, que a construção recria; com o
+    // `dist/` apagado e o ficheiro de redirecionamento ainda lá, migrar primeiro falha.
     command: [
       `rm -rf ${STATE_DIR}`,
-      `E2E_STATE=${STATE_DIR} npx wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR}`,
       "npm run build",
+      `npx wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR}`,
       `E2E_STATE=${STATE_DIR} npx vite preview --port ${PORT} --strictPort`,
     ].join(" && "),
     url: `${ORIGIN}/api/health`,
@@ -2017,7 +2060,11 @@ export async function signUp(page: Page, email = uniqueEmail("ana")): Promise<st
 
 /** Corre uma instrução SQL na base de dados de teste (a de `.e2e-state`): para o que a interface não faz, como promover um administrador. */
 export function sql(command: string): void {
-  execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", STATE_DIR, "--command", command], { stdio: "ignore" });
+  execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", STATE_DIR, "--command", command], {
+    // O stderr do wrangler fica no erro lançado (em vez de se perder) e o limite evita que um wrangler pendurado prenda o teste.
+    stdio: ["ignore", "ignore", "pipe"],
+    timeout: 60_000,
+  });
 }
 
 /** Cria a pasta pelo diálogo «Nova pasta». */
@@ -2124,7 +2171,7 @@ Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  36 passed (36)`, `Tests  283 passed (283)`.
+Expected: `Test Files  36 passed (36)`, `Tests  284 passed (284)`.
 
 Commit:
 
@@ -2272,7 +2319,7 @@ Expected: `2 passed` (a duração varia).
 
 - [ ] **Step 3: Partilha: do diálogo à página pública**
 
-O fluxo inteiro, com dois contextos de browser: o dono cria o link e copia-o (a permissão da área de transferência é dada ao contexto), e **outro contexto, sem cookies**, abre `/s/<token>` (o fallback de SPA do Worker), vê o nome e o tamanho e descarrega. O descarregamento público é sempre um anexo, isolado e sem *cache*. Revogar o link no diálogo faz a página pública mostrar o aviso de «link indisponível», o mesmo de um link que nunca existiu. O último teste não dá a permissão: «Copiar» tem de selecionar o link e explicar como o copiar à mão.
+O fluxo inteiro, com dois contextos de browser: o dono cria o link e copia-o (a permissão da área de transferência é dada ao contexto), e **outro contexto, sem cookies**, abre `/s/<token>` (o fallback de SPA do Worker), vê o nome e o tamanho e descarrega. O descarregamento público é sempre um anexo, isolado e sem *cache*. Revogar o link no diálogo faz a página pública mostrar o aviso de «link indisponível», o mesmo de um link que nunca existiu. O último teste **força** a recusa da área de transferência (um *script* de arranque faz `navigator.clipboard.writeText` rejeitar com `NotAllowedError`, em vez de confiar no que o browser faz por omissão sem permissão): «Copiar» tem de selecionar o link e explicar como o copiar à mão.
 
 Criar `e2e/share.spec.ts`:
 
@@ -2342,6 +2389,10 @@ test("um link que nunca existiu mostra o mesmo aviso que um revogado", async ({ 
 });
 
 test("sem permissão para a área de transferência, «Copiar» seleciona o link e explica como o copiar à mão", async ({ page }) => {
+  // O browser decide sozinho se deixa copiar (o Chromium sem interface recusa, o Chrome com interface aceita): aqui a recusa é forçada.
+  await page.addInitScript(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new DOMException("Sem permissão", "NotAllowedError"));
+  });
   await signUp(page);
   await upload(page, "nota.txt", "olá");
   await chooseAction(page, "Ações para o ficheiro nota.txt", "Partilhar…");
@@ -2587,9 +2638,16 @@ test("o administrador não vê os ficheiros de outras contas (nem na lista, nem 
   await upload(ana, "segredo.txt", "só da ana");
 
   await admin.goto("/");
+  // Primeiro espera-se pela lista (a raiz do administrador está vazia): sem isto, os «0» abaixo passavam durante o «A carregar…».
+  await expect(admin.getByRole("heading", { name: "Meu espaço" })).toBeVisible();
+  await expect(admin.getByText("Esta pasta está vazia.")).toBeVisible();
   await expect(admin.getByRole("button", { name: "Ações para o ficheiro segredo.txt" })).toHaveCount(0);
   await expect(admin.getByText("segredo.txt")).toHaveCount(0);
-  // Nem há rota para o admin ir buscar o ficheiro de outra conta.
+  // Nem há rota para o admin ir buscar o ficheiro de outra conta. O controlo: a pesquisa da própria Ana encontra-o.
+  const anaSearch = await ana.request.get("/api/search?q=segredo");
+  const anaResults = (await anaSearch.json()) as { results: { kind: string; file: { name: string } }[] };
+  expect(anaResults.results).toHaveLength(1);
+  expect(anaResults.results[0]).toMatchObject({ kind: "file", file: { name: "segredo.txt" } });
   const search = await admin.request.get("/api/search?q=segredo");
   expect(await search.json()).toEqual({ results: [] });
   expect((await request.get("/api/admin/users")).status()).toBe(401); // sem sessão
@@ -2681,6 +2739,11 @@ test("«Sair» com um envio a decorrer pergunta antes: «Cancelar» mantém a se
 
 test("um ficheiro largado sobre um diálogo aberto não é enviado", async ({ page }) => {
   await signUp(page);
+  // Conta os envios (`PUT /api/files?...`) desde já: uma negativa logo a seguir ao largar podia passar antes de o envio começar.
+  let uploads = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PUT" && request.url().includes("/api/files?")) uploads++;
+  });
   await page.getByRole("button", { name: "Nova pasta" }).click();
   const dialog = page.getByRole("dialog", { name: "Nova pasta" });
   const dataTransfer = await page.evaluateHandle(() => {
@@ -2691,10 +2754,12 @@ test("um ficheiro largado sobre um diálogo aberto não é enviado", async ({ pa
 
   await dialog.dispatchEvent("dragenter", { dataTransfer });
   await dialog.dispatchEvent("drop", { dataTransfer });
-  await page.getByRole("button", { name: "Cancelar" }).click();
+  await dialog.getByRole("button", { name: "Cancelar" }).click(); // no diálogo: «Cancelar o envio de…» também casaria, se o envio começasse
 
-  await expect(page.getByRole("button", { name: "Ações para o ficheiro largado.txt" })).toHaveCount(0);
+  // Uma ida completa ao servidor dá tempo a uma guarda avariada de começar o envio; só depois se verifica que não houve nenhum.
   await createFolder(page, "Fotos"); // a aplicação continua a responder
+  expect(uploads).toBe(0);
+  await expect(page.getByRole("button", { name: "Ações para o ficheiro largado.txt" })).toHaveCount(0);
 });
 ```
 
@@ -2795,7 +2860,7 @@ Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  36 passed (36)`, `Tests  283 passed (283)`.
+Expected: `Test Files  36 passed (36)`, `Tests  284 passed (284)`.
 
 Run: `npx playwright test`
 Expected: `22 passed` (a duração varia). (a suíte inteira: fumo, envios, pré-visualização, partilha, CSP, administração, teclado e telemóvel).
@@ -2883,7 +2948,7 @@ por:
 ````markdown
 Em produção os erros de cada execução ficam nos registos do Worker (`wrangler tail` ou o painel da Cloudflare).
 
-O cron falha à vista: se um passo falhou, o gatilho `scheduled` rejeita e a execução fica marcada como falhada. Cada execução escreve o relatório numa linha JSON (`{"evento":"manutencao", ...}`) no registo do Worker.
+O cron falha à vista: se um passo falhou, o gatilho `scheduled` rejeita, para a execução aparecer como falhada no painel da Cloudflare (a confirmar em produção). Cada execução escreve o relatório numa linha JSON (`{"evento":"manutencao", ...}`) no registo do Worker.
 
 ## Configuração
 
@@ -2897,7 +2962,7 @@ As variáveis estão em `wrangler.jsonc` (`vars`) e são sempre texto:
 | `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
 | `REGISTRATION_OPEN` | `true` | Só `true` mantém o registo aberto; qualquer outro valor (por exemplo `false`) fecha-o |
 
-**Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`, e as respostas de ficheiros a sua própria CSP. O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
+**Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
 
 ## Testes de ponta a ponta
 
@@ -2935,7 +3000,7 @@ Na secção 4, «Registo e login», trocar:
 por:
 
 ```markdown
-(a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` diferente de `true` (por defeito é `true`) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+(a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
 ```
 
 No ponto do login, trocar:
@@ -2992,6 +3057,30 @@ por:
 | 5A | [Endurecimento e testes de ponta a ponta](2026-10-05-05a-endurecimento-e-testes-e2e.md) | Cabeçalhos de segurança (CSP), registos sem tokens, o cron com falha visível, `REGISTRATION_OPEN`, a passagem de acessibilidade dos diálogos e menus, e a suíte Playwright (fumo, envios, partilha, admin, teclado) contra a aplicação construída | Concluído |
 ```
 
+Nos pendentes do Plano 2, no ponto do CSP `sandbox`, trocar:
+
+```markdown
+confirmar no Plano 5, com o Playwright.
+```
+
+por:
+
+```markdown
+confirmar no Plano 5, com o Playwright (feito no Plano 5A).
+```
+
+Nos pendentes do Plano 2B, no ponto do Playwright, trocar:
+
+```markdown
+confirmar também o arrastar-e-largar e o envio com `Content-Length` num browser real.
+```
+
+por:
+
+```markdown
+confirmar também o arrastar-e-largar e o envio com `Content-Length` num browser real (o arrastar-e-largar e o `Content-Length` ficaram feitos no Plano 5A; o leitor de PDF no Chrome com interface ficou sem plano: ver «Fica sem plano (5A)» no bloco do Plano 5).
+```
+
 O bloco «Plano 5 (deploy)» e a decisão do dono sobre o registo passam a registar o que se resolveu, o que fica e o que é do 5B. Trocar:
 
 ```markdown
@@ -3018,7 +3107,7 @@ por:
 ```markdown
 **Plano 5 (endurecimento, testes de ponta a ponta e deploy): o endurecimento e os testes ficaram no Plano 5A; o deploy é o Plano 5B**
 - Resolvido no 5A (Worker): o hash fictício do login é uma constante (`DUMMY_PASSWORD_HASH`: o primeiro login falhado de cada arranque deixou de pagar dois PBKDF2); `GET /api/health` responde `503 { ok: false }` e regista o erro quando a D1 falha; a dica do `seed:master` segue o destino (`migrateCommand`); a variável `REGISTRATION_OPEN` (só `true` mantém o registo aberto; fechado, `POST /api/auth/register` dá `403 registration_closed` antes do PBKDF2); o gatilho `scheduled` devolve a promessa da manutenção (rejeita se um passo falhou: a execução fica marcada como falhada), o relatório do cron vai para o registo numa linha JSON e `purgeInBlocks` conta bloco a bloco.
-- Resolvido no 5A (cabeçalhos e registos): `Content-Security-Policy` nas páginas da aplicação (`public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`; a API não leva CSP e as respostas de ficheiros têm a sua); `observability` ligado sem os registos de invocação, porque o token de um link de partilha vai no caminho do URL (o relatório do cron e os erros, que são `console.log` e `console.error`, continuam a ir para o registo).
+- Resolvido no 5A (cabeçalhos e registos): `Content-Security-Policy` nas páginas da aplicação (`public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`; a API não leva CSP; as respostas de ficheiros têm a sua (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter); `observability` ligado sem os registos de invocação, porque o token de um link de partilha vai no caminho do URL (o relatório do cron e os erros, que são `console.log` e `console.error`, continuam a ir para o registo).
 - Resolvido no 5A (acessibilidade): o `Modal` tem `aria-describedby`, bloqueia a rolagem da página e, se o botão que o abriu desapareceu, devolve o foco ao `<main>`; o `ConfirmDialog` descreve a pergunta; o erro de validação do `NameDialog` desaparece ao escrever (e há testes de Enter); a zona de largar ignora o que cai num diálogo; o `RowMenu` abre com a seta para baixo, salta com Home e End e não desenha nada sem ações; o botão de perigo tem o anel de foco vermelho; «A carregar…» é uma região de estado (`Loading`); o título e o caminho de uma pasta de nome enorme partem-se no telemóvel e a tabela de contas já não alarga a página.
 - Resolvido no 5A (browser real, `npm run test:e2e`): o teste de fumo da especificação (registo, login, pasta, envio, mover, excluir, restaurar); o `Content-Length` do envio e o arrastar-e-largar; a pré-visualização (a imagem com `default-src 'none'; sandbox`, o PDF sem CSP e com `Range`); a partilha (copiar com e sem permissão da área de transferência, a página pública sem sessão pelo fallback de SPA do Worker, o descarregamento sempre como anexo isolado, a revogação); a CSP em vigor, sem violações e a bloquear um script injetado; o painel `/admin` (a quota 0 impede os envios, suspender e reativar, apagar, e a manutenção que remove a conta e liberta o email); «Sair» com um envio a decorrer; o teclado e o foco dos diálogos e do menu; o ecrã de um telemóvel (375 px).
 - Fica sem plano (5A): a pré-visualização de um PDF no Chrome com interface (o leitor fica com o foco depois de carregar e o Esc não fecha o diálogo: não se vê sem interface, por isso os testes não o apanham); as cargas que não passam pelo `apiFetch` (a imagem e a `<iframe>` da pré-visualização, a ligação «Descarregar») não passam pelo tratamento do 401: com a sessão expirada ou um ficheiro apagado mostram um erro genérico ou o JSON; o resto da página não fica `inert` enquanto há um diálogo; o `PreviewDialog` deixa o Tab sair da `<iframe>`; a lista pisca ao mudar de pasta; faltam testes do contador e do realce da zona de largar, e há um limite de tamanho `Infinity` enquanto `GET /api/config` não chega (o servidor impõe-no na mesma); o relatório do cron não distingue as falhas do R2 (o `purgeFiles` só as regista).
@@ -3044,7 +3133,7 @@ Run: `npx vitest run`
 Expected: `Test Files  37 passed (37)`, `Tests  327 passed (327)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  36 passed (36)`, `Tests  283 passed (283)`.
+Expected: `Test Files  36 passed (36)`, `Tests  284 passed (284)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -3084,12 +3173,13 @@ git commit -m "Documenta o endurecimento, a configuração e os testes de ponta 
 
 **Fora deste plano (Plano 5B, só com o dono):** criar a D1 e o R2 de produção, `wrangler deploy`, o master em produção, as medições na Cloudflare (CPU do PBKDF2 e do cron, a contagem real de subpedidos, o limite de 100 MB do corpo, uma consulta longa na D1), os alertas, as regras de limite de pedidos e o teste de fumo em produção. Ficam sem plano (e registados no índice): o PDF no Chrome com interface, as cargas fora do `apiFetch` com a sessão expirada, o `inert` por baixo dos diálogos, o Tab que sai da `<iframe>` da pré-visualização, a lista que pisca ao mudar de pasta e os pendentes de manutenção dos testes.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 327 passed (327). Interface: Test Files 36 passed (36); Tests 283 passed (283). Ponta a ponta: 22 testes do Playwright.
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 327 passed (327). Interface: Test Files 36 passed (36); Tests 284 passed (284). Ponta a ponta: 22 testes do Playwright.
 
 ## Notas da execução
 
 - **Decisões que a especificação deixa em aberto:** o Plano 5 do índice juntava o que se faz sem a Cloudflare e o deploy; **dividiu-se em 5A (este) e 5B**, porque o deploy cria recursos na conta do dono, usa as suas credenciais e mede coisas que só existem em produção: não se pode executar nem validar por replay. A decisão do dono sobre o registo (a especificação oferece uma regra de limite de pedidos ou uma variável para o fechar) fez-se pela variável, `REGISTRATION_OPEN`, que não muda nada por defeito; a regra de limite de pedidos fica para o 5B. **Só `true` mantém o registo aberto**: um erro de escrita fecha-o em vez de o deixar aberto sem ninguém dar por isso. O `scheduled` devolve a promessa em vez de a entregar ao `waitUntil`, porque não se sabe se a Cloudflare marca como falhada uma execução em que só o `waitUntil` rejeitou. O `observability` fica ligado sem os registos de invocação, porque são eles que trazem o URL (e o token de um link de partilha vai no caminho).
 - **A CSP é mais estrita do que o previsto:** a primeira versão permitia os atributos `style` (`style-src-attr 'unsafe-inline'`) por causa das barras de progresso. Ao tirá-lo para ver o que partia, nada partiu: o React escreve os estilos pelo CSSOM, que a CSP não bloqueia. A política final não tem `unsafe-inline` em lado nenhum. O teste do percurso inteiro foi posto à prova: tirar `img-src 'self'` fez-lhe falhar com a violação da imagem da pré-visualização.
 - **Defeitos que os testes de ponta a ponta encontraram, já corrigidos neste plano:** a tabela de contas fazia a página rolar 270 px no telemóvel, apesar de estar num contentor com `overflow-x-auto` (o texto só para leitores de ecrã, que é `position: absolute`, ficava posicionado em relação à janela e não ao contentor); um nome de pasta enorme alargava a página 957 px (o caminho não partia palavras e o título, um item flexível, não encolhia: `break-all` e `min-w-0`). Dois defeitos de teste, ambos corrigidos: o teste de fumo preenchia o email no formulário de login, que ainda estava no ecrã, antes de a página de registo aparecer (passou a esperar pelo título); e o teste da pesquisa, que procura «a» região de estado, apanhava o «A carregar…» do layout (passou a esperar pela sessão).
+- **Correções que as revisões acrescentaram à primeira versão do código** (e que este plano já traz): a guarda do largar sobre um diálogo olhava ao alvo do evento e falhava no fundo escurecido, que cobre o ecrã todo (passou a ver se há um diálogo aberto, `dialogOpen()`); o teste de «Copiar» sem permissão confiava no que o browser faz por omissão (passou a forçar a recusa da área de transferência); dois testes de ponta a ponta afirmavam menos do que diziam (o do largar sobre um diálogo passou a contar os pedidos `PUT /api/files`, e o da lista do administrador espera pela lista e tem um controlo positivo); a CSP perdeu o `data:` do `img-src` e o teste fixa o conjunto de diretivas; o teste do hash fictício confere o tamanho do salt e do hash (uma constante malformada saltaria o PBKDF2 em silêncio); o `sql()` dos testes mostra o erro do `wrangler` e tem um limite de tempo; o `webServer` apaga o estado, constrói, migra e só então serve (o `wrangler` segue o ficheiro de redirecionamento até ao `dist/`, que a construção recria: com o `dist/` apagado, migrar primeiro falhava); e a documentação diz que as respostas de ficheiros levam a sua CSP exceto a pré-visualização de PDF, e que o cron falhado no painel está por confirmar em produção.
 - **O que os testes de ponta a ponta não veem:** o leitor de PDF do Chrome com interface (apropria-se do foco e o Esc deixa de fechar o diálogo) e tudo o que só existe em produção. Estão no índice dos planos.
 - **Verificação manual:** feita durante a escrita deste plano. A suíte do Playwright correu várias vezes seguidas sem falhas, e confirmou-se à mão que um `.dev.vars` com `REGISTRATION_OPEN=false` fecha o registo (`403 registration_closed`) sem tocar no resto. O PDF no Chrome com interface fica para quem executar o plano (Task 9).
