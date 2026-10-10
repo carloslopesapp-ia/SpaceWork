@@ -34,13 +34,24 @@ export function RowMenu({ label, actions }: RowMenuProps) {
   }, [open]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!open) return;
+    if (!open) {
+      // O botão fechado também abre o menu com a seta para baixo (não obriga a usar Enter ou Espaço).
+      if (event.key === "ArrowDown" && event.target === buttonRef.current) {
+        event.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.stopPropagation();
       setOpen(false);
       buttonRef.current?.focus();
     } else if (event.key === "Tab") {
       setOpen(false);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const items = [...rootRef.current!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+      items[event.key === "Home" ? 0 : items.length - 1].focus();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const items = [...rootRef.current!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
@@ -56,6 +67,8 @@ export function RowMenu({ label, actions }: RowMenuProps) {
     buttonRef.current?.focus();
     action.onSelect?.();
   }
+
+  if (actions.length === 0) return null;
 
   return (
     <div ref={rootRef} className="relative" onKeyDown={onKeyDown}>

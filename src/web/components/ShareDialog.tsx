@@ -4,6 +4,7 @@ import type { FileItem } from "../../shared/types";
 import { errorMessage } from "../api";
 import { shareUrl, useCreateShare, useRevokeShare, useShares } from "../shares";
 import { Button } from "./Button";
+import { Loading } from "./Loading";
 import { Message } from "./Message";
 import { Modal } from "./Modal";
 
@@ -120,7 +121,7 @@ export function ShareDialog({ file, onClose }: { file: FileItem; onClose: () => 
           <h3 className="text-sm font-semibold text-slate-900">Links ativos</h3>
           {revoke.error && <Message kind="error">{errorMessage(revoke.error)}</Message>}
           {shares.isPending ? (
-            <p className="text-sm text-slate-500">A carregar…</p>
+            <Loading className="text-sm" />
           ) : shares.isError && shares.data === undefined ? (
             <div className="space-y-2">
               <Message kind="error">{errorMessage(shares.error)}</Message>

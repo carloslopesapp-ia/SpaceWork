@@ -4,6 +4,7 @@ import { ApiRequestError, errorMessage } from "../api";
 import { Breadcrumb } from "../components/Breadcrumb";
 import { Button } from "../components/Button";
 import { FileRow, FolderRow } from "../components/ItemRows";
+import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { NameDialog } from "../components/NameDialog";
 import { filesFromDrop } from "../dropped-files";
@@ -30,7 +31,7 @@ export default function FolderPage() {
 
   const gone = contents.error instanceof ApiRequestError && contents.error.code === "folder_not_found";
 
-  if (contents.isPending) return <p className="text-slate-500">A carregar…</p>;
+  if (contents.isPending) return <Loading />;
   // O ecrã de erro completo só quando não há nada para mostrar (ainda sem dados, ou a pasta já não existe): um refetch
   // falhado em segundo plano mantém a lista (e os diálogos abertos) e avisa por cima dela.
   if (contents.isError && (gone || contents.data === undefined)) {

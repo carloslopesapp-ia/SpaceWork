@@ -262,3 +262,23 @@ describe("AppLayout: o conteúdo da página", () => {
     expect(screen.getByRole("main")).toHaveAttribute("tabindex", "-1");
   });
 });
+
+describe("AppLayout: enquanto a sessão carrega", () => {
+  it("o aviso é uma região de estado, para o leitor de ecrã o anunciar", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    mockApi({
+      ...CONTENTS,
+      "GET /api/auth/me": async () => {
+        await gate;
+        return json({ user: ME });
+      },
+    });
+    renderApp("/");
+
+    expect(await screen.findByRole("status")).toHaveTextContent("A carregar…");
+
+    release();
+    await screen.findByRole("navigation", { name: "Principal" });
+  });
+});

@@ -75,3 +75,30 @@ describe("RowMenu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
+
+describe("RowMenu: teclado", () => {
+  it("a seta para baixo no botão fechado abre o menu com o foco na primeira ação", async () => {
+    const { button, user } = setup();
+    button.focus();
+
+    await user.keyboard("{ArrowDown}");
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Renomear" })).toHaveFocus();
+  });
+
+  it("Home e End saltam para a primeira e para a última ação", async () => {
+    const { button, user } = setup();
+    await user.click(button);
+
+    await user.keyboard("{End}");
+    expect(screen.getByRole("menuitem", { name: "Excluir" })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(screen.getByRole("menuitem", { name: "Renomear" })).toHaveFocus();
+  });
+
+  it("sem ações não desenha nada (um menu vazio rebentava com as setas)", () => {
+    const { container } = render(<RowMenu label="Ações para a pasta vazia" actions={[]} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});

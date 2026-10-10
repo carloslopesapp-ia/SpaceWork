@@ -175,6 +175,7 @@ describe("pesquisa", () => {
       },
     });
     renderApp("/pesquisa?q=praia");
+    await screen.findByRole("navigation", { name: "Principal" }); // a sessão já carregou (o «A carregar…» do layout também é uma região de estado)
     const status = await screen.findByRole("status");
     await waitFor(() => expect(status).toHaveTextContent("A pesquisar…"));
 

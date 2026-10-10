@@ -6,6 +6,7 @@ import { errorMessage } from "../api";
 import { useAdminUsers } from "../admin";
 import { useMe } from "../auth";
 import { Button } from "../components/Button";
+import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { UsageBar } from "../components/UsageBar";
 import { UserActions } from "../components/UserActions";
@@ -54,7 +55,7 @@ export default function AdminPage() {
   const users = useAdminUsers({ enabled: isAdmin });
 
   if (me.data && !isAdmin) return <Navigate to="/" replace />;
-  if (users.isPending) return <p className="text-slate-500">A carregar…</p>;
+  if (users.isPending) return <Loading />;
   if (users.isError && users.data === undefined) {
     return (
       <div className="max-w-md space-y-4">

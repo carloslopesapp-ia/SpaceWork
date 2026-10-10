@@ -3,6 +3,7 @@ import { errorMessage } from "../api";
 import { useTree } from "../space";
 import { folderOptions, subtreeIds } from "../tree";
 import { Button } from "./Button";
+import { Loading } from "./Loading";
 import { Message } from "./Message";
 import { Modal } from "./Modal";
 
@@ -40,7 +41,7 @@ export function MoveDialog({ title, currentFolderId, movingFolderId, pending, er
   return (
     <Modal title={title} onClose={onClose}>
       {tree.isPending ? (
-        <p className="text-sm text-slate-500">A carregar pastas…</p>
+        <Loading className="text-sm">A carregar pastas…</Loading>
       ) : tree.isError && tree.data === undefined ? (
         <div className="space-y-3">
           <Message kind="error">{errorMessage(tree.error)}</Message>

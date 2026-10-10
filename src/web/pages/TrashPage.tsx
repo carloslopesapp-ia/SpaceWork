@@ -5,6 +5,7 @@ import { ApiRequestError, errorMessage } from "../api";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FileIcon } from "../components/icons";
+import { Loading } from "../components/Loading";
 import { Location } from "../components/Location";
 import { Message } from "../components/Message";
 import { useEmptyTrash, usePurgeFile, useRestoreFile, useTrash } from "../trash";
@@ -65,7 +66,7 @@ export default function TrashPage() {
   const [emptying, setEmptying] = useState(false);
   const [restored, setRestored] = useState<string | null>(null);
 
-  if (trash.isPending) return <p className="text-slate-500">A carregar…</p>;
+  if (trash.isPending) return <Loading />;
   if (trash.isError && trash.data === undefined) {
     return (
       <div className="max-w-md space-y-4">

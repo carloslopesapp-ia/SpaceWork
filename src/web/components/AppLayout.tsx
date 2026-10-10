@@ -5,6 +5,7 @@ import { useLogout, useMe } from "../auth";
 import { UploadsProvider, useUploadsBusy } from "../uploads-context";
 import { Button } from "./Button";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Loading } from "./Loading";
 import { Message } from "./Message";
 import { SearchBox } from "./SearchBox";
 import { UploadPanel } from "./UploadPanel";
@@ -80,7 +81,7 @@ export default function AppLayout() {
     };
   }, [signedIn]);
 
-  if (me.isPending) return <p className="p-8 text-slate-500">A carregar…</p>;
+  if (me.isPending) return <Loading className="p-8" />;
   // Só quando ainda não há dados: um refetch falhado em segundo plano não pode desmontar a aplicação (e a fila de envios).
   if (me.isError && me.data === undefined) {
     return (

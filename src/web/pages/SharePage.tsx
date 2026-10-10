@@ -3,6 +3,7 @@ import { formatBytes } from "../../shared/format";
 import { ApiRequestError, errorMessage } from "../api";
 import { AuthCard } from "../components/AuthCard";
 import { Button, buttonClass } from "../components/Button";
+import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { shareDownloadUrl, usePublicShare } from "../shares";
 
@@ -17,7 +18,7 @@ export default function SharePage() {
 
   let body;
   if (share.isPending) {
-    body = <p className="text-sm text-slate-500">A carregar…</p>;
+    body = <Loading className="text-sm" />;
   } else if (share.isError) {
     body = (
       <div className="space-y-4">
