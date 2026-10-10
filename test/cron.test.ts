@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext, createScheduledController, waitOnExecutionContext } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createScheduledController } from "cloudflare:test";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import worker from "../src/worker";
 import {
   CLEANUP_SQL,
@@ -14,12 +14,17 @@ import {
 } from "../src/worker/cron";
 import { PURGE_BATCH } from "../src/worker/lib/purge";
 import { insertUser } from "./auth-helpers";
-import { dbFailingOn, envCountingSubrequests, silenceErrors } from "./db-helpers";
+import { dbFailingOn, dbWithBatchHook, envCountingSubrequests, silenceErrors } from "./db-helpers";
 import { seedFiles } from "./file-helpers";
 import { resetState } from "./helpers";
 
 beforeEach(resetState);
 afterEach(() => vi.restoreAllMocks());
+// A manutenção regista o relatório com `console.log`: nos testes fica em silêncio (e inspeciona-se onde interessa, por `log`).
+let log: MockInstance<typeof console.log>;
+beforeEach(() => {
+  log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+});
 
 const DAY = 86_400_000;
 /** A hora programada das execuções destes testes. */
@@ -188,12 +193,54 @@ describe("o gatilho do cron", () => {
   it("`scheduled` corre a manutenção à hora programada", async () => {
     const ana = await insertUser("ana@example.com");
     await seedFiles(ana, [{ id: "velho", size: 10, deletedAt: 5 }, { id: "vivo", size: 5 }]);
-    const ctx = createExecutionContext();
 
-    worker.scheduled!(createScheduledController({ scheduledTime: NOW, cron: "0 * * * *" }), env, ctx);
-    await waitOnExecutionContext(ctx);
+    await worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 * * * *" }), env);
 
     expect(await rowIds("files")).toEqual(["vivo"]);
     expect(await used(ana)).toBe(5);
+  });
+
+  it("`scheduled` devolve a promessa da manutenção: se um passo falhou rejeita, e a execução fica marcada como falhada", async () => {
+    silenceErrors();
+    const broken = { ...env, DB: dbFailingOn(/FROM files WHERE deleted_at IS NOT NULL/) } as Env;
+
+    await expect(worker.scheduled(createScheduledController({ scheduledTime: NOW, cron: "0 * * * *" }), broken)).rejects.toThrow(
+      /Manutenção com erros: lixeira: D1 em baixo/,
+    );
+  });
+});
+
+describe("o relatório da manutenção", () => {
+  it("o gatilho regista-o numa só linha JSON, com ou sem erros (é assim que se vê o que a manutenção fez)", async () => {
+    silenceErrors();
+    const ana = await insertUser("ana@example.com");
+    await seedFiles(ana, [{ id: "velho", size: 10, deletedAt: 5 }]);
+
+    await scheduledMaintenance(env, NOW);
+
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({ evento: "manutencao", trashPurged: 1, errors: [] });
+
+    log.mockClear();
+    const broken = { ...env, DB: dbFailingOn(/FROM files WHERE deleted_at IS NOT NULL/) } as Env;
+    await expect(scheduledMaintenance(broken, NOW)).rejects.toThrow(/Manutenção com erros/);
+    expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({ evento: "manutencao", errors: ["lixeira: D1 em baixo"] });
+  });
+
+  it("um bloco que falha a meio não apaga do relatório o que os blocos anteriores já eliminaram", async () => {
+    silenceErrors();
+    const ana = await insertUser("ana@example.com");
+    await seedFiles(
+      ana,
+      Array.from({ length: 3 * PURGE_BATCH + 10 }, (_unused, index) => ({ id: `f${String(index).padStart(3, "0")}`, size: 1, deletedAt: 5 + index })),
+    );
+    // A 4.ª `batch` da execução (o 4.º bloco de 50) falha.
+    const flaky = { ...env, DB: dbWithBatchHook((call, runReal) => (call === 4 ? Promise.reject(new Error("D1 em baixo")) : runReal())) } as Env;
+
+    const report = await runMaintenance(flaky, NOW);
+
+    expect(report.errors).toEqual(["lixeira: D1 em baixo"]);
+    expect(report.trashPurged).toBe(3 * PURGE_BATCH); // os três primeiros blocos saíram e contam
+    expect(await count("files")).toBe(10);
   });
 });

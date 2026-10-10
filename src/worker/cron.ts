@@ -53,13 +53,18 @@ async function selectIds(db: D1Database, sql: string, cutoff: number, limit: num
   return results.map((row) => row.id);
 }
 
-/** Elimina `ids` por blocos de `PURGE_BATCH`, um bloco de cada vez (cada bloco são 2 subpedidos). */
-async function purgeInBlocks(ids: string[], purge: (block: string[]) => Promise<number>): Promise<number> {
-  let purged = 0;
+/**
+ * Elimina `ids` por blocos de `PURGE_BATCH`, um bloco de cada vez (cada bloco são 2 subpedidos). Cada bloco conta logo em `onPurged`:
+ * se um bloco falhar, o relatório continua a dizer o que os anteriores já eliminaram.
+ */
+async function purgeInBlocks(
+  ids: string[],
+  purge: (block: string[]) => Promise<number>,
+  onPurged: (count: number) => void,
+): Promise<void> {
   for (let start = 0; start < ids.length; start += PURGE_BATCH) {
-    purged += await purge(ids.slice(start, start + PURGE_BATCH));
+    onPurged(await purge(ids.slice(start, start + PURGE_BATCH)));
   }
-  return purged;
 }
 
 /**
@@ -90,12 +95,12 @@ export async function runMaintenance(env: Env, now: number = Date.now()): Promis
   await step("lixeira", async () => {
     const cutoff = now - getConfig(env).trashRetentionDays * DAY_MS;
     const ids = await selectIds(env.DB, EXPIRED_TRASH_SQL, cutoff, TRASH_BLOCKS * PURGE_BATCH);
-    report.trashPurged = await purgeInBlocks(ids, (block) => purgeExpiredTrash(env, block));
+    await purgeInBlocks(ids, (block) => purgeExpiredTrash(env, block), (count) => (report.trashPurged += count));
   });
 
   await step("envios pendentes", async () => {
     const ids = await selectIds(env.DB, STALE_PENDING_SQL, now - PENDING_MAX_AGE_MS, PENDING_BLOCKS * PURGE_BATCH);
-    report.pendingPurged = await purgeInBlocks(ids, (block) => purgeStalePending(env, block));
+    await purgeInBlocks(ids, (block) => purgeStalePending(env, block), (count) => (report.pendingPurged += count));
   });
 
   await step("contas em remoção", async () => {
@@ -119,9 +124,13 @@ export async function runMaintenance(env: Env, now: number = Date.now()): Promis
   return report;
 }
 
-/** O que o gatilho do cron corre: a manutenção, e falha a execução (para aparecer no painel da Cloudflare) se algum passo falhou. */
+/**
+ * O que o gatilho do cron corre: a manutenção, o relatório numa linha JSON no registo do Worker (é assim que se vê o que ela fez) e,
+ * se algum passo falhou, uma exceção que faz falhar a execução (para aparecer no painel da Cloudflare).
+ */
 export async function scheduledMaintenance(env: Env, now: number = Date.now()): Promise<MaintenanceReport> {
   const report = await runMaintenance(env, now);
+  console.log(JSON.stringify({ evento: "manutencao", ...report }));
   if (report.errors.length > 0) throw new Error(`Manutenção com erros: ${report.errors.join("; ")}`);
   return report;
 }
