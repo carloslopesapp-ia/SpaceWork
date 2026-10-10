@@ -361,6 +361,29 @@ describe("FolderPage: envio e pré-visualização", () => {
     expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
   });
 
+  it("um diálogo aberto fica com tudo o que se larga, também no fundo (o fundo cobre o ecrã todo)", async () => {
+    const Xhr = stubXhr();
+    serve();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Nova pasta" }));
+    const dialog = screen.getByRole("dialog", { name: "Nova pasta" });
+    const backdrop = dialog.parentElement!;
+    const dataTransfer = {
+      types: ["Files"],
+      items: [{ kind: "file", getAsFile: () => new File(["x"], "solta.png"), webkitGetAsEntry: () => ({ isDirectory: false }) }],
+    };
+
+    fireEvent.dragEnter(backdrop, { dataTransfer });
+    expect(document.querySelector(".outline-dashed")).toBeNull(); // a zona de largar não se acende
+    // `fireEvent` devolve `false` quando alguém chamou `preventDefault`: é a guarda da janela (`AppLayout`) a impedir o browser de abrir o ficheiro.
+    expect(fireEvent.drop(backdrop, { dataTransfer })).toBe(false);
+    expect(fireEvent.drop(dialog, { dataTransfer })).toBe(false);
+
+    expect(Xhr.instances).toHaveLength(0);
+    expect(screen.getByRole("dialog", { name: "Nova pasta" })).toBeInTheDocument();
+  });
+
   it("um ficheiro acima do limite do servidor nem é enviado", async () => {
     const Xhr = stubXhr();
     serve({ "GET /api/config": () => json({ maxUploadBytes: 5 }) });
