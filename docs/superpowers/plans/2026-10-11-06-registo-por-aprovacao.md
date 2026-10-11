@@ -8,7 +8,7 @@
 
 **Tech Stack:** o dos planos anteriores; nenhuma dependência nova.
 
-**Spec:** [docs/superpowers/specs/2026-10-03-spacework-design.md](../specs/2026-10-03-spacework-design.md) (secção 2, a variável `REGISTRATION_OPEN`; secção 3, `users`; secção 4, registo e login; secção 6, API; secção 8, interface; secção 11, deploy). Índice dos planos: [README.md](README.md). A especificação já descreve este comportamento (commit anterior ao plano).
+**Spec:** [docs/superpowers/specs/2026-10-03-spacework-design.md](../specs/2026-10-03-spacework-design.md) (secção 2, a variável `REGISTRATION_OPEN`; secção 3, `users`; secção 4, registo e login; secção 6, API; secção 8, interface; secção 11, deploy). Índice dos planos: [README.md](README.md). A especificação já descreve a maior parte deste comportamento (commit anterior ao plano); o §4 (registo, login e sessões) fecha-se na Task 5.
 
 ## Global Constraints
 
@@ -43,15 +43,16 @@ src/worker/lib/sessions.ts                  a sessão exige approved = 1
 src/worker/routes/admin.ts                  approved na lista e no PATCH; rejeitar apaga logo uma conta por aprovar
 src/shared/types.ts                         PublicUser.pendingApprovals, AdminUser.approved
 src/web/auth.ts                             useRegister devolve a conta entrada ou o pedido pendente
-src/web/pages/RegisterPage.tsx              o ecrã «Conta criada» do registo por aprovação
+src/web/pages/RegisterPage.tsx              o ecrã «Conta criada» do registo por aprovação (com o foco na mensagem)
 src/web/components/AppLayout.tsx            «Admin» com o número de contas por aprovar
 src/web/admin.ts                            useUpdateUser aceita approved: true
 src/web/components/PendingActions.tsx       «Aprovar» e «Rejeitar…» (novo)
-src/web/pages/AdminPage.tsx                 estado «Aguarda aprovação», as ações e a mensagem
+src/web/pages/AdminPage.tsx                 estado «Aguarda aprovação», as ações, a mensagem e «Atualizar» que refaz também a sessão
 wrangler.jsonc, worker-configuration.d.ts   REGISTRATION_OPEN = "approval" (produção)
 vitest.config.ts, vite.config.ts            cada suíte põe o registo aberto na sua configuração
-playwright.config.ts                        a construção dos testes de ponta a ponta também
-README.md, plans/README.md                  a documentação e o índice
+playwright.config.ts, e2e/teardown.ts        a construção dos testes de ponta a ponta também; no fim apagam a dist/
+e2e/approval.spec.ts                       o login, o painel e o contador de uma conta por aprovar, num browser real (novo)
+README.md, spec §4, plans/README.md         a documentação (com a secção «Deploy»), a especificação e o índice
 test/, src/web/                             + os testes acima
 ```
 
@@ -190,6 +191,7 @@ por:
     await registerPending("ana@example.com", "senha-segura-123");
     await login("ana@example.com", "errada-errada");
     await login("ana@example.com", "errada-errada");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first()).toEqual({ n: 2 });
 
     expect((await login("ana@example.com", "senha-segura-123")).status).toBe(403);
 
@@ -834,6 +836,8 @@ por:
 Em `src/worker/routes/auth.ts`, trocar:
 
 ```ts
+  );
+  if (!usable || !passwordOk) throw new ApiError(401, ...INVALID_CREDENTIALS);
 
   // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja suspensa.
   await clearFailures(db, email);
@@ -845,8 +849,11 @@ Em `src/worker/routes/auth.ts`, trocar:
 por:
 
 ```ts
+  );
+  if (!usable || !passwordOk) throw new ApiError(401, ...INVALID_CREDENTIALS);
 
-  // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja suspensa.
+  // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja por aprovar ou suspensa. «Por aprovar» vem antes de «suspensa»
+  // (uma conta por aprovar nunca chegou a entrar), e os dois só se revelam depois de a senha estar certa: com a errada o erro é o genérico.
   await clearFailures(db, email);
   if (row.approved === 0) {
     throw new ApiError(403, "account_pending", "A sua conta aguarda a aprovação do administrador.");
@@ -935,7 +942,7 @@ git commit -m "O Worker aceita o registo por aprovação e recusa o login de con
 
 - [ ] **Step 1: Os testes primeiro**
 
-Cinco comportamentos novos: a lista mostra as contas por aprovar primeiro (da mais antiga para a mais recente) e marca `approved`; `approved: true` aprova a conta, que passa a entrar, e baixa o contador de `/me`; é idempotente e aceita a quota no mesmo pedido; só aceita `true` (a aprovação não se desfaz); e rejeitar (`DELETE`) uma conta por aprovar **apaga-a logo** e liberta o email. Há ainda uma corrida: se outro administrador aprovar a conta entre a leitura e a escrita, o `DELETE` não pode apagá-la (a conta passa a `deleting`, como qualquer conta aprovada). O teste que fixa a lista de campos passa a esperar `approved`; as três rotas de administração continuam a ser as mesmas.
+Cinco comportamentos novos: a lista mostra as contas por aprovar primeiro (da mais antiga para a mais recente) e marca `approved`; `approved: true` aprova a conta, que passa a entrar, e baixa o contador de `/me`; é idempotente e aceita a quota no mesmo pedido; só aceita `true` (a aprovação não se desfaz); e rejeitar (`DELETE`) uma conta por aprovar **apaga-a logo** e liberta o email. Há ainda uma corrida: se outro administrador aprovar a conta entre a leitura e a escrita, o `DELETE` não pode apagá-la (a conta passa a `deleting`, como qualquer conta aprovada). O teste que fixa a lista de campos passa a esperar `approved`; as três rotas de administração continuam a ser as mesmas. Uma conta de administrador não se aprova (403 `admin_protected`), nem com a quota no mesmo pedido.
 
 Em `test/admin.test.ts`, trocar:
 
@@ -1055,13 +1062,24 @@ describe("PATCH /api/admin/users/:id: aprovar", () => {
 
   it("só aceita `approved: true`: a aprovação não se desfaz (para parar uma conta, suspende-se)", async () => {
     const admin = await registerAdmin("admin@example.com");
-    const ana = await registerUser("ana@example.com");
+    const ana = await registerPending("ana@example.com");
     for (const approved of [false, 0, 1, "true", null]) {
-      const res = await patch(admin.cookie, ana.user.id, { approved });
+      const res = await patch(admin.cookie, ana.id, { approved });
       expect(res.status, JSON.stringify(approved)).toBe(400);
       expect(await res.json()).toMatchObject({ error: "invalid_approved" });
     }
-    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.user.id).first()).toEqual({ approved: 1 });
+    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.id).first()).toEqual({ approved: 0 }); // continua por aprovar
+  });
+
+  it("uma conta de administrador não se aprova: `approved` dá o mesmo 403 `admin_protected` que o estado, também com a quota no pedido", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const other = await registerAdmin("outro@example.com");
+    for (const json of [{ approved: true }, { approved: true, quotaBytes: 42 }]) {
+      const res = await patch(admin.cookie, other.user.id, json);
+      expect(res.status, JSON.stringify(json)).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "admin_protected" });
+    }
+    expect((await listUsers(admin.cookie)).find((user) => user.id === other.user.id)?.quotaBytes).not.toBe(42); // nada mudou
   });
 
   it("uma conta em remoção não se aprova (409)", async () => {
@@ -1126,11 +1144,11 @@ por:
 ```
 
 Run: `npx vitest run test/admin.test.ts`
-Expected: FAIL (Test Files  1 failed (1); Tests  7 failed | 15 passed (22)). Falham os testes novos e o da lista de campos.
+Expected: FAIL (Test Files  1 failed (1); Tests  8 failed | 15 passed (23)). Falham os testes novos e o da lista de campos.
 
 - [ ] **Step 2: A implementação**
 
-**Lista:** `ORDER BY approved, created_at, id` (as por aprovar primeiro). **`PATCH`:** `approved` só aceita `true` (400 `invalid_approved`); entra no mesmo `UPDATE` por `COALESCE`, por isso pode ir com a quota ou o estado. **`DELETE`:** uma só `batch` com três instruções: apagar a linha se `approved = 0`, pôr em `deleting` se `approved = 1`, e apagar as sessões. Como as duas primeiras filtram por `approved`, **só uma** age, e o resultado é certo mesmo que a conta mude de estado entre a leitura e a escrita. O tipo `AdminUser` ganha `approved`, e os dados de exemplo dos testes da interface que o usam também (senão o `typecheck` falha).
+**Lista:** `ORDER BY approved, created_at, id` (as por aprovar primeiro). **`PATCH`:** `approved` só aceita `true` (400 `invalid_approved`); entra no mesmo `UPDATE` por `COALESCE`, por isso pode ir com a quota ou o estado. **Administrador:** o guarda que já recusava mudar o estado de uma conta de administrador cobre também `approved` (403 `admin_protected`; só a quota se muda, como a especificação diz). **`DELETE`:** uma só `batch` com três instruções: apagar a linha se `approved = 0`, pôr em `deleting` se `approved = 1`, e apagar as sessões. Como as duas primeiras filtram por `approved`, **só uma** age, e o resultado é certo mesmo que a conta mude de estado entre a leitura e a escrita. O tipo `AdminUser` ganha `approved`, e os dados de exemplo dos testes da interface que o usam também (senão o `typecheck` falha).
 
 Em `src/shared/types.ts`, trocar:
 
@@ -1309,6 +1327,9 @@ admin.get("/users", async (c) => {
  * impede novos uploads. Suspender termina as sessões na mesma `batch` do `UPDATE`: o filtro `status = 'active'` da autenticação não chega,
  * porque ao reativar a conta as sessões antigas voltariam a valer. Uma conta de administrador não se suspende (a quota pode mudar-se) e
  * uma conta em remoção não se mexe.
+ */
+admin.patch("/users/:id", async (c) => {
+  const db = c.env.DB;
 ```
 
 por:
@@ -1328,10 +1349,13 @@ admin.get("/users", async (c) => {
 
 /**
  * Muda a quota (`quotaBytes`, em bytes), o estado (`status`: `active` ou `suspended`) e/ou aprova a conta (`approved: true`, que não se
- * desfaz: para parar uma conta, suspende-se). Uma quota abaixo do uso atual só
- * impede novos uploads. Suspender termina as sessões na mesma `batch` do `UPDATE`: o filtro `status = 'active'` da autenticação não chega,
- * porque ao reativar a conta as sessões antigas voltariam a valer. Uma conta de administrador não se suspende (a quota pode mudar-se) e
- * uma conta em remoção não se mexe.
+ * desfaz: para parar uma conta, suspende-se). Uma quota abaixo do uso atual só impede novos uploads. Suspender termina as sessões na
+ * mesma `batch` do `UPDATE`: o filtro `status = 'active'` da autenticação não chega, porque ao reativar a conta as sessões antigas
+ * voltariam a valer. Numa conta de administrador só a quota se muda (o estado e a aprovação dão 403 `admin_protected`) e uma conta
+ * em remoção não se mexe.
+ */
+admin.patch("/users/:id", async (c) => {
+  const db = c.env.DB;
 ```
 
 Em `src/worker/routes/admin.ts`, trocar:
@@ -1349,6 +1373,18 @@ Em `src/worker/routes/admin.ts`, trocar:
   }
   if (target.status === "deleting") throw accountDeleting();
   if (hasStatus && target.role === "admin") throw adminProtected();
+
+  const quota = hasQuota ? (body.quotaBytes as number) : null;
+  const status = hasStatus ? (body.status as string) : null;
+  const statements = [
+    db
+      .prepare(
+        "UPDATE users SET quota_bytes = COALESCE(?1, quota_bytes), status = COALESCE(?2, status) WHERE id = ?3 AND status != 'deleting'",
+      )
+      .bind(quota, status, target.id),
+  ];
+  if (status === "suspended") statements.push(deleteUserSessionsStatement(db, target.id));
+  const [updated] = await db.batch(statements);
 ```
 
 por:
@@ -1371,26 +1407,10 @@ por:
     throw new ApiError(400, "invalid_approved", "A aprovação só se pode dar: «approved» tem de ser true.");
   }
   if (target.status === "deleting") throw accountDeleting();
-  if (hasStatus && target.role === "admin") throw adminProtected();
-```
+  if ((hasStatus || hasApproved) && target.role === "admin") throw adminProtected();
 
-Em `src/worker/routes/admin.ts`, trocar:
-
-```ts
-  const statements = [
-    db
-      .prepare(
-        "UPDATE users SET quota_bytes = COALESCE(?1, quota_bytes), status = COALESCE(?2, status) WHERE id = ?3 AND status != 'deleting'",
-      )
-      .bind(quota, status, target.id),
-  ];
-  if (status === "suspended") statements.push(deleteUserSessionsStatement(db, target.id));
-  const [updated] = await db.batch(statements);
-```
-
-por:
-
-```ts
+  const quota = hasQuota ? (body.quotaBytes as number) : null;
+  const status = hasStatus ? (body.status as string) : null;
   const statements = [
     db
       .prepare(
@@ -1448,7 +1468,7 @@ admin.delete("/users/:id", async (c) => {
 ```
 
 Run: `npx vitest run`
-Expected: `Test Files  37 passed (37)`, `Tests  345 passed (345)`.
+Expected: `Test Files  37 passed (37)`, `Tests  346 passed (346)`.
 
 - [ ] **Step 3: Verificação e commit**
 
@@ -1480,7 +1500,7 @@ git commit -m "A API de administração lista, aprova e rejeita contas por aprov
 
 - [ ] **Step 1: Os testes primeiro**
 
-Não havia testes das páginas de registo e de login (só o teste de fumo de ponta a ponta), por isso os ficheiros são novos. `RegisterPage.test.tsx`: o registo aberto continua a entrar e a levar a «Meu espaço», o registo por aprovação **não inicia sessão** e mostra a mensagem do servidor, sem o formulário, com a ligação para entrar, e um erro do servidor fica no formulário. `LoginPage.test.tsx`: uma conta por aprovar mostra a mensagem do servidor e fica no formulário. `AppLayout.test.tsx`: «Admin» diz quantas contas aguardam aprovação (no plural e no singular) e fica como estava quando não há nenhuma. Três destes testes descrevem o que já acontece (passam antes do código): fixam o comportamento para que a mudança não o parta.
+Não havia testes das páginas de registo e de login (só o teste de fumo de ponta a ponta), por isso os ficheiros são novos. `RegisterPage.test.tsx`: o registo aberto continua a entrar e a levar a «Meu espaço», o registo por aprovação **não inicia sessão** e mostra a mensagem do servidor, sem o formulário, com a ligação para entrar, e um erro do servidor fica no formulário. `LoginPage.test.tsx`: uma conta por aprovar mostra a mensagem do servidor e fica no formulário. `AppLayout.test.tsx`: «Admin» diz quantas contas aguardam aprovação (no plural e no singular, com o nome acessível e o selo visível) e fica como estava, sem selo nem descrição, quando não há nenhuma. O teste do registo por aprovação também exige o foco na mensagem. Três destes testes descrevem o que já acontece (passam antes do código): fixam o comportamento para que a mudança não o parta.
 
 Em `src/web/components/AppLayout.test.tsx`, trocar:
 
@@ -1499,23 +1519,31 @@ por:
 
 describe("AppLayout: contas por aprovar", () => {
   const ADMIN_ME = { ...ME, id: "adm", email: "admin@example.com", role: "admin" as const };
-  const adminLinkName = async (pendingApprovals?: number) => {
+  const adminLink = async (pendingApprovals?: number) => {
     mockApi({ ...CONTENTS, "GET /api/config": SESSION["GET /api/config"], "GET /api/auth/me": () => json({ user: { ...ADMIN_ME, pendingApprovals } }) });
     renderApp("/");
     await screen.findByRole("navigation", { name: "Principal" });
-    return within(screen.getByRole("navigation", { name: "Principal" })).getByRole("link", { name: /^Admin/ }).getAttribute("aria-label") ?? "Admin";
+    return within(screen.getByRole("navigation", { name: "Principal" })).getByRole("link", { name: /^Admin/ });
   };
 
-  it("«Admin» diz quantas contas aguardam aprovação, no plural e no singular", async () => {
-    expect(await adminLinkName(2)).toBe("Admin, 2 contas por aprovar");
+  it("«Admin» diz quantas contas aguardam aprovação, no plural e no singular, e mostra o número", async () => {
+    const plural = await adminLink(2);
+    expect(plural).toHaveAccessibleName("Admin, 2 contas por aprovar");
+    expect(plural).toHaveTextContent("Admin2");
     cleanup();
-    expect(await adminLinkName(1)).toBe("Admin, 1 conta por aprovar");
+    const singular = await adminLink(1);
+    expect(singular).toHaveAccessibleName("Admin, 1 conta por aprovar");
+    expect(singular).toHaveTextContent("Admin1");
   });
 
-  it("sem contas por aprovar (zero, ou o campo em falta) «Admin» fica como estava", async () => {
-    expect(await adminLinkName(0)).toBe("Admin");
-    cleanup();
-    expect(await adminLinkName(undefined)).toBe("Admin");
+  it("sem contas por aprovar (zero, ou o campo em falta) «Admin» fica como estava, sem selo nem descrição", async () => {
+    for (const count of [0, undefined]) {
+      const link = await adminLink(count);
+      expect(link).toHaveAccessibleName("Admin");
+      expect(link).toHaveTextContent(/^Admin$/);
+      expect(link).not.toHaveAttribute("aria-label");
+      cleanup();
+    }
   });
 });
 ```
@@ -1596,6 +1624,8 @@ describe("RegisterPage", () => {
     await fillAndSubmit(userEvent.setup());
 
     expect(await screen.findByRole("status")).toHaveTextContent(PENDING);
+    expect(screen.getByText(PENDING).parentElement).toHaveFocus(); // o foco passa para a mensagem (o formulário, onde estava, desapareceu)
+    expect(screen.getByText("Quando o administrador a aprovar, entre com o seu email e a sua senha.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Principal" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/login");
@@ -1625,7 +1655,7 @@ Expected: FAIL (Test Files  2 failed | 1 passed (3); Tests  2 failed | 21 passed
 
 - [ ] **Step 2: A implementação**
 
-**`useRegister`** devolve `RegisterResult`: com a conta entrada (`user`) põe-na na cache da sessão, como antes; com `pending` não toca na sessão (não há sessão). **`RegisterPage`**: se a resposta é `pending`, o formulário dá lugar à mensagem do servidor (`Message` de êxito, que é uma região `status`) e a uma frase a dizer que a pessoa entra quando o administrador aprovar; a ligação «Entrar» continua no rodapé. **`AppLayout`**: a ligação «Admin» ganha um selo com o número (escondido dos leitores de ecrã) e o nome acessível «Admin, N contas por aprovar», só quando há contas por aprovar.
+**`useRegister`** devolve `RegisterResult`: com a conta entrada (`user`) põe-na na cache da sessão, como antes; com `pending` não toca na sessão (não há sessão). **`RegisterPage`**: se a resposta é `pending`, o formulário dá lugar à mensagem do servidor (`Message` de êxito, que é uma região `status`) e a uma frase a dizer que a pessoa entra quando o administrador aprovar; a ligação «Entrar» continua no rodapé. **O foco passa para a mensagem** (o botão onde estava desapareceu com o formulário, e uma região `status` que entra já preenchida pode não ser anunciada). **`AppLayout`**: a ligação «Admin» ganha um selo com o número (escondido dos leitores de ecrã) e o nome acessível «Admin, N contas por aprovar», só quando há contas por aprovar.
 
 Em `src/web/auth.ts`, trocar:
 
@@ -1747,6 +1777,51 @@ por:
 Em `src/web/pages/RegisterPage.tsx`, trocar:
 
 ```tsx
+import { useState, type FormEvent } from "react";
+import { Link, Navigate } from "react-router";
+import { isValidPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../shared/validation";
+import { useMe, useRegister } from "../auth";
+```
+
+por:
+
+```tsx
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, Navigate } from "react-router";
+import { isValidPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../shared/validation";
+import { useMe, useRegister } from "../auth";
+```
+
+Em `src/web/pages/RegisterPage.tsx`, trocar:
+
+```tsx
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  if (me.data) return <Navigate to="/" replace />;
+```
+
+por:
+
+```tsx
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const pendingRef = useRef<HTMLDivElement>(null);
+  const pending = register.data !== undefined && "pending" in register.data;
+
+  // No registo por aprovação o formulário desaparece, e o foco com ele: passa para a mensagem, para o leitor de ecrã a ler.
+  useEffect(() => {
+    if (pending) pendingRef.current?.focus();
+  }, [pending]);
+
+  if (me.data) return <Navigate to="/" replace />;
+```
+
+Em `src/web/pages/RegisterPage.tsx`, trocar:
+
+```tsx
   }
 
   const error = localError ?? register.error?.message ?? null;
@@ -1776,7 +1851,7 @@ por:
           </>
         }
       >
-        <div className="space-y-4">
+        <div ref={pendingRef} tabIndex={-1} className="space-y-4 outline-none">
           <Message kind="success">{register.data.message}</Message>
           <p className="text-sm text-slate-600">Quando o administrador a aprovar, entre com o seu email e a sua senha.</p>
         </div>
@@ -1818,7 +1893,7 @@ git commit -m "O registo por aprovação na interface: ecrã de registo e contad
 
 - [ ] **Step 1: Os testes primeiro**
 
-`PendingActions.test.tsx` (novo): «Aprovar» envia `approved: true` **sem pedir confirmação** (não se perde nada) e um erro aparece por baixo dos botões; «Rejeitar…» pede confirmação, «Cancelar» não apaga nada, confirmar apaga e fecha o diálogo, e um erro fica no diálogo. `AdminPage.test.tsx`: as contas por aprovar mostram «Aguarda aprovação» e só as duas ações (as outras contas continuam com o menu), a página diz quantas são (plural e singular) e não diz nada quando não há; aprovar passa a conta a «Ativa», com o menu normal, e o contador da barra lateral baixa (a sessão refaz-se); rejeitar apaga a conta da lista. `admin.test.tsx`: o hook envia `approved: true` e refaz a lista e a sessão.
+`PendingActions.test.tsx` (novo): «Aprovar» envia `approved: true` **sem pedir confirmação** (não se perde nada) e um erro aparece por baixo dos botões; «Rejeitar…» pede confirmação, «Cancelar» não apaga nada, confirmar apaga e fecha o diálogo, e um erro fica no diálogo; «Rejeitar…» fica desativado enquanto «Aprovar» decorre. `AdminPage.test.tsx`: as contas por aprovar mostram «Aguarda aprovação» e só as duas ações (as outras contas continuam com o menu), a página diz quantas são (plural e singular) e não diz nada quando não há; aprovar passa a conta a «Ativa», com o menu normal, e o contador da barra lateral baixa (a sessão refaz-se); rejeitar apaga a conta da lista; «Atualizar» refaz também a sessão. `admin.test.tsx`: o hook envia `approved: true` e refaz a lista e a sessão.
 
 Em `src/web/admin.test.tsx`, trocar:
 
@@ -1900,6 +1975,25 @@ describe("PendingActions", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("«Rejeitar…» fica desativado enquanto «Aprovar» decorre (não se decide a mesma conta duas vezes)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    mockApi({
+      "PATCH /api/admin/users/:id": async () => {
+        await gate;
+        return json({ user: { ...BOB, approved: true } });
+      },
+    });
+    const user = setup();
+
+    await user.click(screen.getByRole("button", { name: APPROVE }));
+    expect(screen.getByRole("button", { name: APPROVE })).toBeDisabled();
+    expect(screen.getByRole("button", { name: REJECT })).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: REJECT })).toBeEnabled());
+  });
+
   it("um erro ao aprovar aparece por baixo dos botões", async () => {
     mockApi({ "PATCH /api/admin/users/:id": () => apiError(409, "account_deleting", "Esta conta está a ser removida.") });
     const user = setup();
@@ -1972,6 +2066,45 @@ const OUTRA: AdminUser = { id: "u5", email: "outra@example.com", role: "user", s
 function serve(users: AdminUser[], extra: Parameters<typeof mockApi>[0] = {}) {
   return mockApi({
     ...SESSION,
+```
+
+Em `src/web/pages/AdminPage.test.tsx`, trocar:
+
+```tsx
+    expect(server.callsTo("GET /api/admin/users").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("AdminPage: ações", () => {
+  it("suspender uma conta atualiza o estado na tabela e o menu passa a oferecer «Reativar»", async () => {
+    let suspended = false;
+    const server = serve([ADMIN, ANA], {
+```
+
+por:
+
+```tsx
+    expect(server.callsTo("GET /api/admin/users").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("AdminPage: atualizar", () => {
+  it("«Atualizar» refaz também a sessão, para o contador da barra lateral e a mensagem da página não discordarem", async () => {
+    const server = serve([ADMIN]);
+    renderApp("/admin");
+    await screen.findByRole("heading", { name: "Utilizadores" });
+    const before = server.callsTo("GET /api/auth/me").length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Atualizar" }));
+
+    await waitFor(() => expect(server.callsTo("GET /api/auth/me").length).toBeGreaterThan(before));
+  });
+});
+
+describe("AdminPage: ações", () => {
+  it("suspender uma conta atualiza o estado na tabela e o menu passa a oferecer «Reativar»", async () => {
+    let suspended = false;
+    const server = serve([ADMIN, ANA], {
 ```
 
 Em `src/web/pages/AdminPage.test.tsx`, trocar:
@@ -2069,11 +2202,11 @@ Run:
 ```bash
 npx vitest run -c vitest.web.config.ts src/web/components/PendingActions.test.tsx src/web/pages/AdminPage.test.tsx
 ```
-Expected: FAIL (Test Files  2 failed (2); Tests  4 failed | 9 passed (13)). O `PendingActions.test.tsx` nem arranca (o componente ainda não existe) e falham os testes novos do painel.
+Expected: FAIL (Test Files  2 failed (2); Tests  5 failed | 9 passed (14)). O `PendingActions.test.tsx` nem arranca (o componente ainda não existe) e falham os testes novos do painel.
 
 - [ ] **Step 2: A implementação**
 
-**`PendingActions`** põe as duas decisões à vista, sem menu: «Aprovar» (não pede confirmação) e «Rejeitar…» (confirma, e apaga o pedido de vez). Os botões levam o email no nome acessível (`Aprovar a conta …`, `Rejeitar o pedido de …`), para o leitor de ecrã e para os testes distinguirem as linhas. **`AdminPage`**: o estado de uma conta por aprovar é «Aguarda aprovação» (não há estado de utilização para mostrar), a ação da linha é `PendingActions` em vez de `UserActions`, e acima da tabela uma frase diz quantas contas aguardam a aprovação. **`useUpdateUser`** aceita `approved: true`; os dois hooks já refazem a lista e a sessão no fim, que é o que faz o contador da barra lateral baixar.
+**`PendingActions`** põe as duas decisões à vista, sem menu: «Aprovar» (não pede confirmação) e «Rejeitar…» (confirma, e apaga o pedido de vez). Os botões levam o email no nome acessível (`Aprovar a conta …`, `Rejeitar o pedido de …`), para o leitor de ecrã e para os testes distinguirem as linhas. **`AdminPage`**: o estado de uma conta por aprovar é «Aguarda aprovação» (não há estado de utilização para mostrar), a ação da linha é `PendingActions` em vez de `UserActions`, e acima da tabela uma frase diz quantas contas aguardam a aprovação. **«Atualizar»** refaz também a sessão (o contador da barra lateral vem dela e não pode discordar da mensagem da página); a pílula «Aguarda aprovação» não parte a linha. **`useUpdateUser`** aceita `approved: true`; os dois hooks já refazem a lista e a sessão no fim, que é o que faz o contador da barra lateral baixar.
 
 Em `src/web/admin.ts`, trocar:
 
@@ -2150,11 +2283,9 @@ export function PendingActions({ user }: { user: AdminUser }) {
         <Button
           variant="secondary"
           className="px-3 py-1.5"
+          disabled={update.isPending} // não se rejeita uma conta enquanto «Aprovar» decorre
           aria-label={`Rejeitar o pedido de ${user.email}`}
-          onClick={() => {
-            update.reset(); // um erro de «Aprovar» não pode aparecer num diálogo que ainda ninguém confirmou
-            open("reject");
-          }}
+          onClick={() => open("reject")}
         >
           Rejeitar…
         </Button>
@@ -2184,6 +2315,14 @@ export function PendingActions({ user }: { user: AdminUser }) {
 Em `src/web/pages/AdminPage.tsx`, trocar:
 
 ```tsx
+import type { ReactNode } from "react";
+import { Navigate } from "react-router";
+import { formatDate } from "../../shared/format";
+import type { AdminUser, UserStatus } from "../../shared/types";
+import { errorMessage } from "../api";
+import { useAdminUsers } from "../admin";
+import { useMe } from "../auth";
+import { Button } from "../components/Button";
 import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { UsageBar } from "../components/UsageBar";
@@ -2195,6 +2334,15 @@ const STATUS_LABEL: Record<UserStatus, string> = { active: "Ativa", suspended: "
 por:
 
 ```tsx
+import { useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { Navigate } from "react-router";
+import { formatDate } from "../../shared/format";
+import type { AdminUser, UserStatus } from "../../shared/types";
+import { errorMessage } from "../api";
+import { useAdminUsers } from "../admin";
+import { ME_KEY, useMe } from "../auth";
+import { Button } from "../components/Button";
 import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { UsageBar } from "../components/UsageBar";
@@ -2224,7 +2372,7 @@ por:
 
 /** O estado que a linha mostra: uma conta por aprovar ainda não tem estado de utilização. */
 const PENDING_LABEL = "Aguarda aprovação";
-const PENDING_STYLE = "bg-indigo-50 text-indigo-700";
+const PENDING_STYLE = "bg-indigo-50 whitespace-nowrap text-indigo-700";
 
 function UserRow({ user, isSelf, actions }: { user: AdminUser; isSelf: boolean; actions?: ReactNode }) {
   return (
@@ -2261,12 +2409,46 @@ por:
 Em `src/web/pages/AdminPage.tsx`, trocar:
 
 ```tsx
+  const me = useMe();
+  const isAdmin = me.data?.role === "admin";
+  const users = useAdminUsers({ enabled: isAdmin });
+
+  if (me.data && !isAdmin) return <Navigate to="/" replace />;
+  if (users.isPending) return <Loading />;
+```
+
+por:
+
+```tsx
+  const me = useMe();
+  const isAdmin = me.data?.role === "admin";
+  const users = useAdminUsers({ enabled: isAdmin });
+  const queryClient = useQueryClient();
+
+  if (me.data && !isAdmin) return <Navigate to="/" replace />;
+  if (users.isPending) return <Loading />;
+```
+
+Em `src/web/pages/AdminPage.tsx`, trocar:
+
+```tsx
     );
   }
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Utilizadores</h1>
+        <Button variant="secondary" disabled={users.isFetching} onClick={() => void users.refetch()}>
+          Atualizar
+        </Button>
+      </div>
+      <p className="mt-2 text-sm text-slate-600">
+        {users.data.length} {users.data.length === 1 ? "conta" : "contas"}. Uma conta apagada passa a «A remover» e a manutenção por hora elimina-a, com os ficheiros.
+      </p>
+      {users.isError && (
+        <div className="mt-4">
+          <Message kind="error">{errorMessage(users.error)}</Message>
 ```
 
 por:
@@ -2280,22 +2462,19 @@ por:
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-```
-
-Em `src/web/pages/AdminPage.tsx`, trocar:
-
-```tsx
-      <p className="mt-2 text-sm text-slate-600">
-        {users.data.length} {users.data.length === 1 ? "conta" : "contas"}. Uma conta apagada passa a «A remover» e a manutenção por hora elimina-a, com os ficheiros.
-      </p>
-      {users.isError && (
-        <div className="mt-4">
-          <Message kind="error">{errorMessage(users.error)}</Message>
-```
-
-por:
-
-```tsx
+        <h1 className="text-2xl font-bold tracking-tight">Utilizadores</h1>
+        {/* Também refaz a sessão: o contador de contas por aprovar da barra lateral vem dela e não pode discordar da mensagem desta página. */}
+        <Button
+          variant="secondary"
+          disabled={users.isFetching}
+          onClick={() => {
+            void users.refetch();
+            void queryClient.invalidateQueries({ queryKey: ME_KEY });
+          }}
+        >
+          Atualizar
+        </Button>
+      </div>
       <p className="mt-2 text-sm text-slate-600">
         {users.data.length} {users.data.length === 1 ? "conta" : "contas"}. Uma conta apagada passa a «A remover» e a manutenção por hora elimina-a, com os ficheiros.
       </p>
@@ -2334,7 +2513,7 @@ por:
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  39 passed (39)`, `Tests  301 passed (301)`.
+Expected: `Test Files  39 passed (39)`, `Tests  303 passed (303)`.
 
 - [ ] **Step 3: Verificação e commit**
 
@@ -2353,14 +2532,51 @@ git commit -m "O painel do administrador aprova e rejeita as contas por aprovar"
 ### Task 5: A produção em modo de aprovação, as suítes que continuam a partir do registo aberto e a documentação
 
 **Files:**
-- Modify: `wrangler.jsonc`, `worker-configuration.d.ts` (gerado), `vitest.config.ts`, `vite.config.ts`, `playwright.config.ts`
-- Modify: `README.md`, `docs/superpowers/plans/README.md`
+- Create: `e2e/teardown.ts`, `e2e/approval.spec.ts`
+- Modify: `wrangler.jsonc`, `worker-configuration.d.ts` (gerado), `vitest.config.ts`, `vite.config.ts`, `playwright.config.ts`, `test/config.test.ts`, `src/web/shell.test.ts`
+- Modify: `README.md`, `docs/superpowers/specs/2026-10-03-spacework-design.md`, `docs/superpowers/plans/README.md`
 
 **Interfaces:**
 - Consumes: tudo o que as Tasks 1 a 4 entregam, o `config` do plugin da Cloudflare para o Vite e as variáveis de ambiente `E2E_STATE` (`vite.config.ts`, planos 5A).
-- Produces: `REGISTRATION_OPEN = "approval"` em `wrangler.jsonc`; os testes do Worker e os de ponta a ponta com o registo aberto na sua própria configuração; o README e o índice dos planos com o Plano 6 «Concluído».
+- Produces: `REGISTRATION_OPEN = "approval"` em `wrangler.jsonc` (com um teste que o guarda); os testes do Worker e os de ponta a ponta com o registo aberto na sua própria configuração, e um `globalTeardown` que apaga a `dist/` dos testes; um teste de ponta a ponta do painel; a especificação §4, o README (com a secção «Deploy») e o índice dos planos com o Plano 6 «Concluído».
 
-- [ ] **Step 1: A produção passa a «por aprovação» (e as suítes avisam)**
+- [ ] **Step 1: Um teste que guarda a decisão (primeiro)**
+
+Nada garantia, até aqui, que a produção usa o registo por aprovação: era só uma decisão escrita. Um teste lê o `wrangler.jsonc` (como o dos registos) e exige `"REGISTRATION_OPEN": "approval"`. Ainda falha: o `wrangler.jsonc` tem `true`.
+
+Em `src/web/shell.test.ts`, trocar:
+
+```ts
+  });
+});
+
+describe("a configuração de registos do Worker", () => {
+  it("o `observability` está ligado, mas sem os registos de invocação (levariam o token de cada link de partilha, que vai no caminho do URL)", () => {
+    const config = JSON.parse(wrangler) as { observability?: { enabled?: boolean; logs?: { invocation_logs?: boolean } } };
+```
+
+por:
+
+```ts
+  });
+});
+
+describe("a configuração do registo", () => {
+  it("a produção usa o registo por aprovação (as suítes põem o registo aberto na sua própria configuração)", () => {
+    const config = JSON.parse(wrangler) as { vars?: { REGISTRATION_OPEN?: string } };
+    expect(config.vars?.REGISTRATION_OPEN).toBe("approval");
+  });
+});
+
+describe("a configuração de registos do Worker", () => {
+  it("o `observability` está ligado, mas sem os registos de invocação (levariam o token de cada link de partilha, que vai no caminho do URL)", () => {
+    const config = JSON.parse(wrangler) as { observability?: { enabled?: boolean; logs?: { invocation_logs?: boolean } } };
+```
+
+Run: `npx vitest run -c vitest.web.config.ts src/web/shell.test.ts`
+Expected: FAIL (Test Files  1 failed (1); Tests  1 failed | 4 passed (5)). O teste novo falha (o `wrangler.jsonc` ainda tem `true`); o passo seguinte muda-o.
+
+- [ ] **Step 2: A produção passa a «por aprovação» (e as suítes avisam)**
 
 Fecha-se a decisão do dono: `wrangler.jsonc` fica com `"REGISTRATION_OPEN": "approval"`, e `npm run cf-typegen` regenera os tipos (`REGISTRATION_OPEN: "approval"`). Isto parte as duas suítes que **criam contas e entram logo**: os testes do Worker (`registerUser` espera 201 e uma sessão) e os de ponta a ponta (`signUp`). Os dois pedidos seguintes mostram-no.
 
@@ -2390,14 +2606,38 @@ Run: `npm run cf-typegen`
 Expected: o `wrangler` regenera `worker-configuration.d.ts`; a única diferença é `REGISTRATION_OPEN: "approval";` (e o `hash` do cabeçalho).
 
 Run: `npx vitest run`
-Expected: FAIL (Test Files  24 failed | 13 passed (37); Tests  221 failed | 124 passed (345)). Falham os testes que registam uma conta e esperam entrar logo.
+Expected: FAIL (Test Files  24 failed | 13 passed (37); Tests  222 failed | 124 passed (346)). Falham os testes que registam uma conta e esperam entrar logo.
 
 Run: `npx playwright test e2e/smoke.spec.ts`
 Expected: FAIL (`1 failed`, `0 passed`). O teste de fumo regista uma conta e fica sem sessão (o servidor responde 202).
 
-- [ ] **Step 2: Os testes do Worker partem do registo aberto**
+- [ ] **Step 3: Os testes do Worker partem do registo aberto**
 
 `miniflare.bindings` do Vitest sobrepõe a variável: os testes partem do registo aberto e, quando precisam de outro modo, escolhem-no por pedido (`fetchWithEnv` com `REGISTRATION_OPEN`).
+
+Em `test/config.test.ts`, trocar:
+
+```ts
+import { getConfig } from "../src/worker/config";
+
+describe("getConfig", () => {
+  it("lê os valores de wrangler.jsonc", () => {
+    expect(getConfig(env)).toEqual({
+      defaultQuotaBytes: 1_073_741_824,
+      maxUploadBytes: 104_857_600,
+```
+
+por:
+
+```ts
+import { getConfig } from "../src/worker/config";
+
+describe("getConfig", () => {
+  it("lê os valores de wrangler.jsonc (menos o registo, que o `vitest.config.ts` põe aberto para os testes)", () => {
+    expect(getConfig(env)).toEqual({
+      defaultQuotaBytes: 1_073_741_824,
+      maxUploadBytes: 104_857_600,
+```
 
 Em `vitest.config.ts`, trocar:
 
@@ -2425,11 +2665,49 @@ por:
 ```
 
 Run: `npx vitest run`
-Expected: `Test Files  37 passed (37)`, `Tests  345 passed (345)`.
+Expected: `Test Files  37 passed (37)`, `Tests  346 passed (346)`.
 
-- [ ] **Step 3: Os testes de ponta a ponta partem do registo aberto**
+- [ ] **Step 4: Os testes de ponta a ponta partem do registo aberto**
 
 O plugin da Cloudflare deixa personalizar a configuração do Worker (`config`). Quando `E2E_STATE` existe, `vite.config.ts` põe `REGISTRATION_OPEN` a `true` na construção, e `playwright.config.ts` passa a dar `E2E_STATE` também ao `npm run build`. A construção de produção, sem essa variável, fica com `approval`. (A alternativa, deixar `true` no repositório e escolher `approval` no comando de deploy, deixava um `npm run deploy` à mão abrir o registo em silêncio.)
+
+Criar `e2e/teardown.ts`:
+
+```ts
+import { rmSync } from "node:fs";
+
+/**
+ * A construção dos testes de ponta a ponta tem o registo aberto (a de produção é por aprovação): não pode ficar em `dist/` à espera de um
+ * `wrangler deploy` à mão, que a publicava. Sem `dist/` (e sem o ficheiro de redirecionamento do plugin), esse comando falha à vista.
+ */
+export default function globalTeardown() {
+  rmSync("dist", { recursive: true, force: true });
+  rmSync(".wrangler/deploy", { recursive: true, force: true });
+}
+```
+
+Em `playwright.config.ts`, trocar:
+
+```ts
+  timeout: 30_000,
+  expect: { timeout: 7_000 },
+  forbidOnly: Boolean(process.env.CI),
+  reporter: [["list"]],
+  use: {
+    baseURL: ORIGIN,
+```
+
+por:
+
+```ts
+  timeout: 30_000,
+  expect: { timeout: 7_000 },
+  forbidOnly: Boolean(process.env.CI),
+  globalTeardown: "./e2e/teardown.ts",
+  reporter: [["list"]],
+  use: {
+    baseURL: ORIGIN,
+```
 
 Em `playwright.config.ts`, trocar:
 
@@ -2484,12 +2762,96 @@ export default defineConfig({
 });
 ```
 
+**`e2e/teardown.ts`** (`globalTeardown` do Playwright) apaga `dist/` e `.wrangler/deploy/` quando a suíte acaba: a construção dos testes de ponta a ponta tem o registo aberto, e deixá-la em `dist/` fazia um `npx wrangler deploy` solto publicá-la. Sem `dist/`, esse comando falha à vista ("The directory specified by the assets.directory field ... does not exist"). `npm run deploy` e o Workers Builds reconstroem sempre de raiz.
+
 Run: `npx playwright test`
-Expected: `22 passed` (a duração varia). (a suíte inteira, agora com a construção que tem o registo aberto só para os testes).
+Expected: `22 passed` (a duração varia). (a suíte inteira, agora com a construção que tem o registo aberto só para os testes; no fim, `dist/` desaparece).
 
-- [ ] **Step 4: README e índice dos planos**
+- [ ] **Step 5: O painel e o login de uma conta por aprovar, num browser real**
 
-O README descreve a API (a lista com `approved`, o `PATCH` com `approved`, o `DELETE` de uma conta por aprovar, o registo em três modos, `pendingApprovals` em `/me`), o painel e a variável `REGISTRATION_OPEN`. O índice passa o Plano 6 a «Concluído». A especificação já foi atualizada antes deste plano.
+O servidor dos testes de ponta a ponta tem o registo aberto, por isso este teste faz entrar a conta pelo registo aberto e passa-a a «por aprovar» pela base de teste (`approved = 0`): a sessão dela deixa de valer, o login explica porquê, o administrador vê o contador e o pedido, «Aprovar» passa a linha a «Ativa» e a conta entra. O ecrã do próprio registo por aprovação tem os testes da interface (Task 3).
+
+Criar `e2e/approval.spec.ts`:
+
+```ts
+import { expect, test } from "@playwright/test";
+import { PASSWORD, signUp, sql, uniqueEmail } from "./support";
+
+// O servidor dos testes de ponta a ponta tem o registo aberto (cada teste cria a sua conta e entra logo). Para ver o registo por aprovação num
+// browser real, a conta entra pelo registo aberto e passa-se a «por aprovar» pela base de teste: o que se vê depois (o login, o painel e o
+// contador) é o que se vê em produção. O ecrã do próprio registo por aprovação tem os testes da interface.
+test("uma conta por aprovar não entra, aparece no painel e, depois de aprovada, entra", async ({ browser }) => {
+  const adminEmail = uniqueEmail("admin");
+  const anaEmail = uniqueEmail("ana");
+  const adminContext = await browser.newContext();
+  const anaContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  const ana = await anaContext.newPage();
+  await signUp(admin, adminEmail);
+  sql(`UPDATE users SET role = 'admin' WHERE email = '${adminEmail}'`);
+  await signUp(ana, anaEmail);
+  sql(`UPDATE users SET approved = 0 WHERE email = '${anaEmail}'`);
+
+  await test.step("a conta por aprovar não entra: a sessão deixa de valer e o login explica porquê", async () => {
+    await ana.reload();
+    await expect(ana.getByRole("heading", { name: "Entrar" })).toBeVisible();
+    await ana.getByLabel("Email").fill(anaEmail);
+    await ana.getByLabel("Senha").fill(PASSWORD);
+    await ana.getByRole("button", { name: "Entrar" }).click();
+    await expect(ana.getByText("A sua conta aguarda a aprovação do administrador.")).toBeVisible();
+  });
+
+  const anaRow = admin.getByRole("row", { name: new RegExp(anaEmail) });
+  await test.step("o administrador vê o pedido: o contador, «Aguarda aprovação» e as duas decisões", async () => {
+    await admin.reload();
+    await admin.getByRole("link", { name: "Admin, 1 conta por aprovar" }).click();
+    await expect(anaRow.getByText("Aguarda aprovação")).toBeVisible();
+    await expect(anaRow.getByRole("button", { name: `Rejeitar o pedido de ${anaEmail}` })).toBeVisible();
+  });
+
+  await test.step("«Aprovar»: a linha passa a «Ativa», o contador desaparece e a conta entra", async () => {
+    await anaRow.getByRole("button", { name: `Aprovar a conta ${anaEmail}` }).click();
+    await expect(anaRow.getByText("Ativa")).toBeVisible();
+    await expect(anaRow.getByRole("button", { name: `Ações para a conta ${anaEmail}` })).toBeVisible();
+    await expect(admin.getByRole("link", { name: "Admin", exact: true })).toBeVisible();
+
+    await ana.getByRole("button", { name: "Entrar" }).click();
+    await expect(ana.getByRole("heading", { name: "Meu espaço" })).toBeVisible();
+  });
+
+  await adminContext.close();
+  await anaContext.close();
+});
+```
+
+Run: `npx playwright test e2e/approval.spec.ts`
+Expected: `1 passed` (a duração varia).
+
+- [ ] **Step 6: README e índice dos planos**
+
+O README descreve a API (a lista com `approved`, o `PATCH` com `approved`, o `DELETE` de uma conta por aprovar, o registo em três modos, `pendingApprovals` em `/me`), o painel e a variável `REGISTRATION_OPEN`, e ganha uma secção **«Deploy»** (a migração antes do push; `npm run deploy` e não um `wrangler deploy` solto; o registo da produção é por aprovação). A especificação já descrevia o essencial (§2, §3, §6, §8 e §11, antes deste plano); o §4 (o registo por aprovação, o login `account_pending` e a sessão que exige `approved = 1`) fecha-se aqui. O índice passa o Plano 6 a «Concluído».
+
+Em `README.md`, trocar:
+
+````markdown
+unset MASTER_PASSWORD
+```
+
+(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor). O `--remote` só funciona depois de a D1 de produção existir: o `database_id` do `wrangler.jsonc` é provisório (o deploy é o Plano 5B).
+
+## Comandos
+````
+
+por:
+
+````markdown
+unset MASTER_PASSWORD
+```
+
+(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor). O `--remote` só funciona depois de `wrangler login` (o `database_id` do `wrangler.jsonc` é o da D1 de produção).
+
+## Comandos
+````
 
 Em `README.md`, trocar:
 
@@ -2555,25 +2917,48 @@ por:
 
 Em `README.md`, trocar:
 
-```markdown
+````markdown
 | `MAX_UPLOAD_BYTES` | `104857600` (100 MiB) | Tamanho máximo de um ficheiro |
 | `TRASH_RETENTION_DAYS` | `30` | Dias na lixeira antes de o cron eliminar o ficheiro |
 | `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
 | `REGISTRATION_OPEN` | `true` | Só `true` mantém o registo aberto; qualquer outro valor (por exemplo `false`) fecha-o |
 
 **Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
-```
+
+## Testes de ponta a ponta
+
+Correm num browser real contra a aplicação **construída** (`vite build` e `vite preview`: o Worker no workerd, com os assets estáticos e o `public/_headers` como em produção), com a D1 e o R2 simulados em `.e2e-state` (nunca a `.wrangler` de desenvolvimento), que começam vazios em cada execução. Usam a porta 4180.
+
+```bash
+npx playwright install chromium   # só da primeira vez (cerca de 100 MB)
+````
 
 por:
 
-```markdown
+````markdown
 | `MAX_UPLOAD_BYTES` | `104857600` (100 MiB) | Tamanho máximo de um ficheiro |
 | `TRASH_RETENTION_DAYS` | `30` | Dias na lixeira antes de o cron eliminar o ficheiro |
 | `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
 | `REGISTRATION_OPEN` | `true` (em `wrangler.jsonc`: `approval`) | `true`, ou sem a variável: registo aberto. `approval`: registo aberto, mas as contas novas ficam por aprovar até um administrador as aprovar no painel. Qualquer outro valor (por exemplo `false`) fecha o registo |
 
 **Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
-```
+
+## Deploy (Cloudflare)
+
+O repositório está ligado à Cloudflare (Workers Builds): cada push para `main` constrói (`npm run build`) e publica (`npx wrangler deploy`). Duas regras:
+
+1. **As migrações da D1 não correm sozinhas.** Uma migração nova tem de ser aplicada à D1 de produção (`npm run db:migrate:remote`) **antes** do push que traz o código que a usa; senão o Worker novo responde 500 em tudo o que toca na base. O `/api/health` não o mostra (só faz `SELECT 1`): depois do deploy, entre com o master e abra `/admin`.
+2. **Publique com `npm run deploy`** (reconstrói e publica), e não com um `npx wrangler deploy` solto: este publica o que houver em `dist/`, e depois dos testes de ponta a ponta isso era uma construção com o registo aberto. Os testes apagam a `dist/` ao acabar, por isso esse comando falha à vista. O Workers Builds constrói sempre de raiz.
+
+O registo da produção é **por aprovação** (`REGISTRATION_OPEN` = `approval`): quem se regista fica «Aguarda aprovação» até o administrador aprovar em `/admin`. O `npm run dev` também arranca assim: crie o master com `npm run seed:master -- --local` (numa base local que já existia, aplique primeiro `npm run db:migrate:local`) ou ponha `REGISTRATION_OPEN=true` num `.dev.vars`.
+
+## Testes de ponta a ponta
+
+Correm num browser real contra a aplicação **construída** (`vite build` e `vite preview`: o Worker no workerd, com os assets estáticos e o `public/_headers` como em produção; o registo é que é aberto, porque cada teste cria a sua conta e entra logo: a produção usa o registo por aprovação), com a D1 e o R2 simulados em `.e2e-state` (nunca a `.wrangler` de desenvolvimento), que começam vazios em cada execução. Usam a porta 4180.
+
+```bash
+npx playwright install chromium   # só da primeira vez (cerca de 100 MB)
+````
 
 Em `docs/superpowers/plans/README.md`, trocar:
 
@@ -2597,7 +2982,58 @@ por:
 ## Factos verificados que os planos seguintes devem respeitar
 ```
 
-- [ ] **Step 5: Verificação manual**
+Em `docs/superpowers/specs/2026-10-03-spacework-design.md`, trocar:
+
+```markdown
+### Registo e login
+
+- Email normalizado (trim + minúsculas, máx. 254 caracteres). Senha de 8 a 128 caracteres.
+- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta está suspensa (403). Contas `deleting` tratam-se como inexistentes.
+- Bloqueio: com 5 ou mais falhas do mesmo email nos últimos 15 minutos, o login é recusado (429). Uma entrada bem-sucedida apaga as falhas desse email. (Compromisso aceite: alguém pode bloquear o login de um email alheio durante 15 minutos.)
+
+### Senhas
+```
+
+por:
+
+```markdown
+### Registo e login
+
+- Email normalizado (trim + minúsculas, máx. 254 caracteres). Senha de 8 a 128 caracteres.
+- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e (no registo aberto) inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` e de `approval` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+- **Registo por aprovação** (`REGISTRATION_OPEN = approval`): a conta cria-se com `approved = 0` e **sem sessão**: o registo responde 202 `{ pending: true, message }` e a pessoa não entra nem carrega nada. Um administrador aprova (`approved = 1`: a conta passa a entrar) ou rejeita (apaga-a de vez: não tem ficheiros, e o email fica livre logo).
+- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta aguarda aprovação (403 `account_pending`) ou está suspensa (403 `account_suspended`), por esta ordem; com a senha errada o erro é o genérico. Contas `deleting` tratam-se como inexistentes.
+- Bloqueio: com 5 ou mais falhas do mesmo email nos últimos 15 minutos, o login é recusado (429). Uma entrada bem-sucedida apaga as falhas desse email. (Compromisso aceite: alguém pode bloquear o login de um email alheio durante 15 minutos.)
+
+### Senhas
+```
+
+Em `docs/superpowers/specs/2026-10-03-spacework-design.md`, trocar:
+
+```markdown
+### Sessões
+
+- Token de 32 bytes aleatórios em cookie `sw_session`: `HttpOnly; SameSite=Lax; Path=/; Max-Age=<SESSION_TTL>`, com `Secure` quando o pedido é HTTPS (em desenvolvimento local em HTTP não se põe `Secure`).
+- A D1 guarda só o hash do token. O logout apaga a sessão. Suspender ou apagar um utilizador e alterar a senha apagam as sessões em causa.
+- Pedidos POST/PUT/PATCH/DELETE: o cabeçalho `Origin` tem de existir e coincidir com a origem do pedido, caso contrário 403 (proteção CSRF, em conjunto com `SameSite=Lax`).
+
+### Isolamento de dados
+```
+
+por:
+
+```markdown
+### Sessões
+
+- Token de 32 bytes aleatórios em cookie `sw_session`: `HttpOnly; SameSite=Lax; Path=/; Max-Age=<SESSION_TTL>`, com `Secure` quando o pedido é HTTPS (em desenvolvimento local em HTTP não se põe `Secure`).
+- A D1 guarda só o hash do token. A autenticação por sessão exige `status = 'active'` e `approved = 1`. O logout apaga a sessão. Suspender ou apagar um utilizador e alterar a senha apagam as sessões em causa.
+- Pedidos POST/PUT/PATCH/DELETE: o cabeçalho `Origin` tem de existir e coincidir com a origem do pedido, caso contrário 403 (proteção CSRF, em conjunto com `SameSite=Lax`).
+
+### Isolamento de dados
+```
+
+- [ ] **Step 7: Verificação manual**
 
 Os testes cobrem a lógica; falta ver o percurso inteiro num browser real, numa base local limpa, com contas **fictícias** (`*@example.test`) e uma senha inventada:
 
@@ -2608,13 +3044,13 @@ Os testes cobrem a lógica; falta ver o percurso inteiro num browser real, numa 
 5. Registar `bob@example.test` e «Rejeitar…»: pede confirmação e a conta desaparece; registar o mesmo email outra vez funciona logo.
 6. Apagar o `.wrangler` e os cookies no fim.
 
-- [ ] **Step 6: Verificação final e commit**
+- [ ] **Step 8: Verificação final e commit**
 
 Run: `npx vitest run`
-Expected: `Test Files  37 passed (37)`, `Tests  345 passed (345)`.
+Expected: `Test Files  37 passed (37)`, `Tests  346 passed (346)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  39 passed (39)`, `Tests  301 passed (301)`.
+Expected: `Test Files  39 passed (39)`, `Tests  304 passed (304)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -2623,7 +3059,7 @@ Run: `npm run build`
 Expected: `✓ built in ...` duas vezes (Worker e cliente); o `dist/spacework/wrangler.json` leva `REGISTRATION_OPEN: "approval"`.
 
 Run: `npx playwright test`
-Expected: `22 passed` (a duração varia).
+Expected: `23 passed` (a duração varia).
 
 Commit:
 
@@ -2646,15 +3082,17 @@ git commit -m "Põe a produção em registo por aprovação e documenta o regist
 | Spec §8: o ecrã do registo («Conta criada») e a mensagem no login | Task 3 |
 | Spec §8: «Admin» com o número de contas por aprovar | Task 3 |
 | Spec §8: a tabela com «Aguarda aprovação», «Aprovar» e «Rejeitar…» | Task 4 |
-| Spec §2 e §11: a produção em `approval` e a ordem migração antes do push | Task 5 e Global Constraints |
+| Spec §4: o registo por aprovação, o login `account_pending` e a sessão que exige `approved = 1` na própria especificação | Task 5 |
+| Spec §2 e §11: a produção em `approval` e a ordem migração antes do push (e a secção «Deploy» do README) | Task 5 e Global Constraints |
 
 **Fora deste plano:** a expiração dos pedidos que ninguém decide (apagá-los pelo cron ao fim de N dias), um teto para o número de pedidos pendentes (um robô podia enchê-los: cada pedido gasta um PBKDF2 e uma linha), o aviso por email ao administrador e uma opção no painel para trocar o modo do registo sem mexer em `wrangler.jsonc`. Ficam como possíveis melhorias; nenhuma é preciso para a v1.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 345 passed (345). Interface: Test Files 39 passed (39); Tests 301 passed (301). Ponta a ponta: 22 testes do Playwright.
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 346 passed (346). Interface: Test Files 39 passed (39); Tests 304 passed (304). Ponta a ponta: 23 testes do Playwright.
 
 ## Notas da execução
 
 - **Decisões que a especificação deixa em aberto:** uma **coluna** (`approved`) e não um estado novo, pela razão da secção «Architecture»; o registo por aprovação responde **202** (a conta foi criada, mas ainda não há recurso para devolver) e não 201; o login só revela «por aprovar» com a senha certa, para não dizer a quem não tem a senha que o email existe; **rejeitar** apaga a conta logo (sem `deleting` nem cron), com os dois `DELETE`/`UPDATE` na mesma `batch` filtrados por `approved`, para que uma conta aprovada entre a leitura e a escrita siga o caminho normal em vez de desaparecer (há um teste da corrida); aprovar **não se desfaz**.
 - **A produção em `approval` sem partir as suítes:** `wrangler.jsonc` passa a ter `"REGISTRATION_OPEN": "approval"`, e as duas suítes que precisam do registo aberto põem-no na sua configuração: o Vitest do Worker com `miniflare.bindings`, e os testes de ponta a ponta com o `config` do plugin da Cloudflare em `vite.config.ts`, ativo só quando `E2E_STATE` existe (por isso a construção dos testes de ponta a ponta passa a levar `E2E_STATE`; a construção de produção não). Fazer o contrário, deixar `true` no repositório e escolher `approval` no comando de deploy, deixava um `npm run deploy` à mão abrir o registo em silêncio.
+- **Correções que as revisões acrescentaram à primeira versão do código** (e que este plano já traz): `approved` num administrador dá o mesmo 403 `admin_protected` que o estado (a especificação diz que numa conta de admin só a quota muda); o comentário da ordem `account_pending` / `account_suspended` e a pré-condição do teste das falhas de login; o ecrã «Conta criada» passa o foco para a mensagem (o formulário desaparece e o foco ia para o `<body>`); «Rejeitar…» fica desativado enquanto «Aprovar» decorre (e sai um `reset()` redundante), a pílula não parte a linha e «Atualizar» refaz também a sessão (o contador da barra lateral e a mensagem da página discordavam); os testes do selo da barra lateral afirmam o selo e o nome acessível; um teste fixa que a produção usa `approval`; **o `globalTeardown` dos testes de ponta a ponta apaga `dist/` e `.wrangler/deploy/`**, porque a construção deles tem o registo aberto e um `npx wrangler deploy` solto publicava-a; um teste de ponta a ponta do login, do painel e do contador de uma conta por aprovar; e a especificação §4 (o registo, o login e as sessões) e a secção «Deploy» do README (a migração antes do push; `npm run deploy`).
 - **O que fica por fazer, e é do utilizador:** aplicar a migração à D1 de produção (`npm run db:migrate:remote`) **antes** do push; depois do push, ver no painel de produção que o registo cria uma conta «Aguarda aprovação» e que «Aprovar» a deixa entrar. O ecrã de registo em produção também mostra a mensagem do servidor.
 - **Verificação manual:** feita durante a escrita deste plano, com contas fictícias numa base local limpa (ver a Task 5).
