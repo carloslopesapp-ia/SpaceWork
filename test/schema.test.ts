@@ -33,6 +33,12 @@ describe("esquema da D1", () => {
     await expect(insertUser("u2", "ana@example.com")).rejects.toThrow(/UNIQUE constraint failed/);
   });
 
+  it("a coluna `approved` vale 1 por defeito (as contas que já existiam ficam aprovadas) e só aceita 0 ou 1", async () => {
+    await insertUser("u1", "ana@example.com");
+    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = 'u1'").first()).toEqual({ approved: 1 });
+    await expect(env.DB.prepare("UPDATE users SET approved = 2 WHERE id = 'u1'").run()).rejects.toThrow(/CHECK constraint failed/);
+  });
+
   it("só aceita os papéis admin e user", async () => {
     await expect(insertUser("u1", "ana@example.com", "root")).rejects.toThrow(
       /CHECK constraint failed/,

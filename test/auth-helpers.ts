@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { PublicUser } from "../src/shared/types";
-import { api, sessionCookie } from "./helpers";
+import { fetchWithEnv } from "./db-helpers";
+import { api, buildRequest, sessionCookie } from "./helpers";
 
 export interface UserBody {
   user: PublicUser;
@@ -18,6 +19,19 @@ export async function registerUser(
   }
   const { user } = (await res.json()) as UserBody;
   return { cookie, user, password };
+}
+
+/** Regista uma conta com o registo por aprovação (`REGISTRATION_OPEN=approval`): fica por aprovar e sem sessão. Devolve o id. */
+export async function registerPending(
+  email = "ana@example.com",
+  password = "senha-segura-123",
+): Promise<{ id: string; password: string }> {
+  const res = await fetchWithEnv(buildRequest("/api/auth/register", { method: "POST", json: { email, password } }), {
+    REGISTRATION_OPEN: "approval",
+  });
+  if (res.status !== 202) throw new Error(`registerPending falhou: ${res.status} ${await res.text()}`);
+  const row = await env.DB.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first<{ id: string }>();
+  return { id: row!.id, password };
 }
 
 export function login(email: string, password: string): Promise<Response> {

@@ -1,10 +1,19 @@
+/** Como se regista uma conta: `open` (entra logo), `approval` (fica por aprovar até um administrador a ativar) ou `closed` (403). */
+export type RegistrationMode = "open" | "approval" | "closed";
+
 export interface AppConfig {
   defaultQuotaBytes: number;
   maxUploadBytes: number;
   trashRetentionDays: number;
   sessionTtlDays: number;
-  /** Se `false`, `POST /api/auth/register` responde 403 (o dono fecha o registo depois de criar as contas). */
-  registrationOpen: boolean;
+  /** `REGISTRATION_OPEN`: ver `RegistrationMode`. Fechado, `POST /api/auth/register` responde 403. */
+  registrationMode: RegistrationMode;
+}
+
+/** Sem a variável o registo está aberto (decisão do dono); com ela, só `true` e `approval` o abrem: um erro de escrita fecha-o. */
+function toRegistrationMode(value: string | undefined): RegistrationMode {
+  if (value === undefined || value === "true") return "open";
+  return value === "approval" ? "approval" : "closed";
 }
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
@@ -19,7 +28,6 @@ export function getConfig(env: Env): AppConfig {
     maxUploadBytes: toPositiveInt(env.MAX_UPLOAD_BYTES, 104_857_600),
     trashRetentionDays: toPositiveInt(env.TRASH_RETENTION_DAYS, 30),
     sessionTtlDays: toPositiveInt(env.SESSION_TTL_DAYS, 14),
-    // Sem a variável o registo está aberto (decisão do dono); com ela, só `true` o mantém aberto: um erro de escrita fecha-o.
-    registrationOpen: env.REGISTRATION_OPEN === undefined || env.REGISTRATION_OPEN === "true",
+    registrationMode: toRegistrationMode(env.REGISTRATION_OPEN),
   };
 }

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { registerUser, setUserStatus, type UserBody } from "./auth-helpers";
+import { insertUser, registerAdmin, registerPending, registerUser, setUserStatus, type UserBody } from "./auth-helpers";
 import { fetchWithEnv } from "./db-helpers";
 import { api, buildRequest, resetDb } from "./helpers";
 
@@ -116,6 +116,74 @@ describe("GET /api/auth/me", () => {
     const { cookie } = await registerUser("ana@example.com");
     await setUserStatus("ana@example.com", "suspended");
     expect((await api("/api/auth/me", { cookie })).status).toBe(401);
+  });
+
+  it("uma sessão de uma conta por aprovar não autentica (a autenticação exige `approved = 1`)", async () => {
+    const { cookie } = await registerUser("ana@example.com");
+    await env.DB.prepare("UPDATE users SET approved = 0 WHERE email = 'ana@example.com'").run();
+    expect((await api("/api/auth/me", { cookie })).status).toBe(401);
+  });
+
+  it("para um administrador, diz quantas contas aguardam aprovação (as por aprovar, e só essas); para os outros não leva o campo", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerUser("ana@example.com");
+    expect(((await (await api("/api/auth/me", { cookie: admin.cookie })).json()) as UserBody).user).toMatchObject({ pendingApprovals: 0 });
+
+    await registerPending("bob@example.com");
+    await registerPending("eva@example.com");
+    await insertUser("fred@example.com", { status: "suspended" }); // suspensa não é por aprovar
+
+    const adminMe = ((await (await api("/api/auth/me", { cookie: admin.cookie })).json()) as UserBody).user;
+    expect(adminMe.pendingApprovals).toBe(2);
+    const anaMe = ((await (await api("/api/auth/me", { cookie: ana.cookie })).json()) as UserBody).user;
+    expect(anaMe).not.toHaveProperty("pendingApprovals");
+  });
+});
+
+describe("POST /api/auth/register com o registo por aprovação", () => {
+  const approval = { REGISTRATION_OPEN: "approval" };
+  const register = (email = "ana@example.com") =>
+    fetchWithEnv(buildRequest("/api/auth/register", { method: "POST", json: { email, password: "senha-segura-123" } }), approval);
+
+  it("cria a conta por aprovar, responde 202 e não inicia sessão", async () => {
+    const res = await register();
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ pending: true, message: "Conta criada. Aguarde a aprovação do administrador." });
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(await env.DB.prepare("SELECT status, role, approved, quota_bytes FROM users WHERE email = 'ana@example.com'").first()).toEqual({
+      status: "active",
+      role: "user",
+      approved: 0,
+      quota_bytes: 1_073_741_824,
+    });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first()).toEqual({ n: 0 });
+  });
+
+  it("um email já registado continua a dar 409, aprovado ou não", async () => {
+    await registerUser("ana@example.com");
+    await registerPending("bob@example.com");
+
+    for (const email of ["ana@example.com", "bob@example.com"]) {
+      const res = await register(email);
+      expect(res.status, email).toBe(409);
+      expect(await res.json()).toMatchObject({ error: "email_taken" });
+    }
+  });
+
+  it("valida o email e a senha como no registo aberto", async () => {
+    const res = await fetchWithEnv(
+      buildRequest("/api/auth/register", { method: "POST", json: { email: "ana@example.com", password: "curta" } }),
+      approval,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_password" });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first()).toEqual({ n: 0 });
+  });
+
+  it("com o registo aberto (`true`) a conta nasce aprovada e entra logo", async () => {
+    const ana = await registerUser("ana@example.com");
+    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.user.id).first()).toEqual({ approved: 1 });
   });
 });
 

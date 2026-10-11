@@ -22,7 +22,7 @@ export async function createSession(
   return { token };
 }
 
-/** Devolve o utilizador da sessão, ou null se o token não existir, tiver expirado ou a conta não estiver ativa. */
+/** Devolve o utilizador da sessão, ou null se o token não existir, tiver expirado ou a conta não estiver ativa e aprovada. */
 export async function findSession(
   db: D1Database,
   token: string,
@@ -33,7 +33,7 @@ export async function findSession(
     .prepare(
       `SELECT u.id, u.email, u.role, u.status, u.quota_bytes, u.used_bytes
        FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.status = 'active'`,
+       WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.status = 'active' AND u.approved = 1`,
     )
     .bind(tokenHash, now)
     .first<UserRow>();

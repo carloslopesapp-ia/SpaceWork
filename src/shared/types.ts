@@ -8,6 +8,8 @@ export interface PublicUser {
   role: Role;
   quotaBytes: number;
   usedBytes: number;
+  /** Só para um administrador: quantas contas aguardam a sua aprovação (registo por aprovação). */
+  pendingApprovals?: number;
 }
 
 /** Pasta tal como a API a devolve ao frontend. */

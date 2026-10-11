@@ -9,7 +9,7 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
-      registrationOpen: true,
+      registrationMode: "open",
     });
   });
 
@@ -26,7 +26,7 @@ describe("getConfig", () => {
       maxUploadBytes: 10,
       trashRetentionDays: 7,
       sessionTtlDays: 1,
-      registrationOpen: false,
+      registrationMode: "closed",
     });
   });
 
@@ -41,7 +41,7 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
-      registrationOpen: true,
+      registrationMode: "open",
     });
   });
 
@@ -57,19 +57,20 @@ describe("getConfig", () => {
       maxUploadBytes: 104_857_600,
       trashRetentionDays: 30,
       sessionTtlDays: 14,
-      registrationOpen: true,
+      registrationMode: "open",
     });
   });
 });
 
-describe("getConfig: registrationOpen", () => {
-  it("o registo está aberto sem a variável e só `true` o mantém aberto (qualquer outro valor fecha-o)", () => {
-    const open = (value: string | undefined) =>
-      getConfig({ REGISTRATION_OPEN: value } as unknown as Env).registrationOpen;
-    expect(open(undefined)).toBe(true);
-    expect(open("true")).toBe(true);
-    expect(open("false")).toBe(false);
-    expect(open("flase")).toBe(false);
-    expect(open("")).toBe(false);
+describe("getConfig: registrationMode", () => {
+  it("o registo está aberto sem a variável, `true` abre-o, `approval` abre-o por aprovação e qualquer outro valor fecha-o", () => {
+    const mode = (value: string | undefined) => getConfig({ REGISTRATION_OPEN: value } as unknown as Env).registrationMode;
+    expect(mode(undefined)).toBe("open");
+    expect(mode("true")).toBe("open");
+    expect(mode("approval")).toBe("approval");
+    expect(mode("false")).toBe("closed");
+    expect(mode("flase")).toBe("closed");
+    expect(mode("Approval")).toBe("closed"); // só o valor exato conta: um erro de escrita fecha o registo em vez de o abrir
+    expect(mode("")).toBe("closed");
   });
 });

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { login, registerUser, setUserStatus, type UserBody } from "./auth-helpers";
+import { login, registerPending, registerUser, setUserStatus, type UserBody } from "./auth-helpers";
 import { api, resetDb, sessionCookie } from "./helpers";
 
 beforeEach(resetDb);
@@ -64,6 +64,47 @@ describe("POST /api/auth/login", () => {
     expect(await right.json()).toMatchObject({ error: "account_suspended" });
     expect(sessionCookie(right)).toBeNull();
     expect((await login("ana@example.com", "senha-errada-123")).status).toBe(401);
+  });
+
+  it("conta por aprovar: 403 `account_pending` só com a senha certa (sem sessão), 401 com a errada", async () => {
+    await registerPending("ana@example.com", "senha-segura-123");
+
+    const right = await login("ana@example.com", "senha-segura-123");
+    expect(right.status).toBe(403);
+    expect(await right.json()).toEqual({ error: "account_pending", message: "A sua conta aguarda a aprovação do administrador." });
+    expect(sessionCookie(right)).toBeNull();
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first()).toEqual({ n: 0 });
+
+    const wrong = await login("ana@example.com", "senha-errada-123");
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toMatchObject({ error: "invalid_credentials" });
+  });
+
+  it("uma senha certa apaga as falhas, mesmo numa conta por aprovar", async () => {
+    await registerPending("ana@example.com", "senha-segura-123");
+    await login("ana@example.com", "errada-errada");
+    await login("ana@example.com", "errada-errada");
+
+    expect((await login("ana@example.com", "senha-segura-123")).status).toBe(403);
+
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first()).toEqual({ n: 0 });
+  });
+
+  it("uma conta por aprovar e suspensa dá primeiro `account_pending`", async () => {
+    await registerPending("ana@example.com", "senha-segura-123");
+    await setUserStatus("ana@example.com", "suspended");
+    expect(await (await login("ana@example.com", "senha-segura-123")).json()).toMatchObject({ error: "account_pending" });
+  });
+
+  it("depois de aprovada, a mesma conta entra", async () => {
+    await registerPending("ana@example.com", "senha-segura-123");
+    expect((await login("ana@example.com", "senha-segura-123")).status).toBe(403);
+
+    await env.DB.prepare("UPDATE users SET approved = 1 WHERE email = 'ana@example.com'").run();
+
+    const res = await login("ana@example.com", "senha-segura-123");
+    expect(res.status).toBe(200);
+    expect(sessionCookie(res)).not.toBeNull();
   });
 
   it("conta em remoção é tratada como inexistente", async () => {

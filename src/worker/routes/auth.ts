@@ -7,7 +7,7 @@ import { DUMMY_PASSWORD_HASH, hashPassword, sha256Hex, verifyPassword } from "..
 import { readJsonObject, readString } from "../lib/http";
 import { clearFailures, tryRecordAttempt } from "../lib/login-limit";
 import { createSession, deleteSessionByHash, deleteUserSessionsStatement } from "../lib/sessions";
-import { rowToAuthUser, toPublicUser, type UserRow } from "../lib/users";
+import { rowToAuthUser, toSessionUser, type UserRow } from "../lib/users";
 import {
   isValidEmail,
   isValidPassword,
@@ -25,9 +25,11 @@ const LOCKED_OUT = [
   "Demasiadas tentativas. Tente novamente dentro de 15 minutos.",
 ] as const;
 
+const PENDING_MESSAGE = "Conta criada. Aguarde a aprovação do administrador.";
+
 auth.post("/register", async (c) => {
   const config = getConfig(c.env);
-  if (!config.registrationOpen) {
+  if (config.registrationMode === "closed") {
     throw new ApiError(403, "registration_closed", "O registo está fechado. Peça uma conta ao administrador.");
   }
   const body = await readJsonObject(c);
@@ -40,12 +42,13 @@ auth.post("/register", async (c) => {
 
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
+  const pending = config.registrationMode === "approval";
   try {
     await c.env.DB.prepare(
-      `INSERT INTO users (id, email, password_hash, role, status, quota_bytes, used_bytes, created_at)
-       VALUES (?1, ?2, ?3, 'user', 'active', ?4, 0, ?5)`,
+      `INSERT INTO users (id, email, password_hash, role, status, approved, quota_bytes, used_bytes, created_at)
+       VALUES (?1, ?2, ?3, 'user', 'active', ?4, ?5, 0, ?6)`,
     )
-      .bind(id, email, passwordHash, config.defaultQuotaBytes, Date.now())
+      .bind(id, email, passwordHash, pending ? 0 : 1, config.defaultQuotaBytes, Date.now())
       .run();
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -53,6 +56,9 @@ auth.post("/register", async (c) => {
     }
     throw error;
   }
+
+  // Por aprovar: sem sessão. A pessoa só entra depois de um administrador aprovar a conta.
+  if (pending) return c.json({ pending: true, message: PENDING_MESSAGE }, 202);
 
   const { token } = await createSession(c.env.DB, id, config.sessionTtlDays);
   setSessionCookie(c, token, config.sessionTtlDays);
@@ -64,7 +70,7 @@ auth.post("/register", async (c) => {
     quota_bytes: config.defaultQuotaBytes,
     used_bytes: 0,
   });
-  return c.json({ user: toPublicUser(user) }, 201);
+  return c.json({ user: await toSessionUser(c.env.DB, user) }, 201);
 });
 
 auth.post("/login", async (c) => {
@@ -84,10 +90,10 @@ auth.post("/login", async (c) => {
 
   const row = await db
     .prepare(
-      "SELECT id, email, password_hash, role, status, quota_bytes, used_bytes FROM users WHERE email = ?1",
+      "SELECT id, email, password_hash, role, status, approved, quota_bytes, used_bytes FROM users WHERE email = ?1",
     )
     .bind(email)
-    .first<UserRow & { password_hash: string }>();
+    .first<UserRow & { password_hash: string; approved: number }>();
 
   // Contas inexistentes ou em remoção gastam o mesmo tempo de CPU e dão o mesmo erro genérico.
   const usable = row !== null && row.status !== "deleting";
@@ -99,6 +105,9 @@ auth.post("/login", async (c) => {
 
   // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja suspensa.
   await clearFailures(db, email);
+  if (row.approved === 0) {
+    throw new ApiError(403, "account_pending", "A sua conta aguarda a aprovação do administrador.");
+  }
   if (row.status === "suspended") {
     throw new ApiError(403, "account_suspended", "Conta suspensa. Contacte o administrador.");
   }
@@ -106,7 +115,7 @@ auth.post("/login", async (c) => {
   const config = getConfig(c.env);
   const { token } = await createSession(db, row.id, config.sessionTtlDays);
   setSessionCookie(c, token, config.sessionTtlDays);
-  return c.json({ user: toPublicUser(rowToAuthUser(row)) });
+  return c.json({ user: await toSessionUser(db, rowToAuthUser(row)) });
 });
 
 auth.post("/logout", async (c) => {
@@ -116,8 +125,8 @@ auth.post("/logout", async (c) => {
   return c.body(null, 204);
 });
 
-auth.get("/me", requireAuth, (c) => {
-  return c.json({ user: toPublicUser(c.get("user")) });
+auth.get("/me", requireAuth, async (c) => {
+  return c.json({ user: await toSessionUser(c.env.DB, c.get("user")) });
 });
 
 auth.post("/password", requireAuth, async (c) => {

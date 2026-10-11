@@ -31,3 +31,11 @@ export function toPublicUser(user: AuthUser): PublicUser {
     usedBytes: user.usedBytes,
   };
 }
+
+/** O utilizador como o frontend o recebe ao entrar e em `/me`; para um administrador, com o número de contas por aprovar. */
+export async function toSessionUser(db: D1Database, user: AuthUser): Promise<PublicUser> {
+  const publicUser = toPublicUser(user);
+  if (user.role !== "admin") return publicUser;
+  const row = await db.prepare("SELECT COUNT(*) AS n FROM users WHERE approved = 0 AND status != 'deleting'").first<{ n: number }>();
+  return { ...publicUser, pendingApprovals: row?.n ?? 0 };
+}
