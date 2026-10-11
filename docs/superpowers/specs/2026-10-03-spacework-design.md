@@ -242,9 +242,9 @@ Recuperação de senha por email (e, por isso, o admin **não** consegue repor a
 
 1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. **O login e o registo correm em produção sem o erro de limite de CPU** (confirmado a 2026-10-11, e 100 000 é aceite como número de iterações); falta o percentil 99 do tempo de CPU em Métrica. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês).
 2. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
-3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação; o desenho do Plano 4 gasta 32 no pior caso: confirmar em produção que a contagem é a esperada e que o gatilho de hora a hora corre).
+3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação; o desenho do Plano 4 gasta 32 no pior caso: confirmar em produção que a contagem é a esperada com uma execução que tenha muito para limpar). **O gatilho de hora a hora corre** (confirmado a 2026-10-11, 20:00 de Lisboa, com o relatório registado).
 4. O gatilho do cron devolve a promessa da manutenção (`async scheduled`): confirmar no painel da Cloudflare que uma execução com erro aparece como falhada, e medir o CPU da pior execução (4 páginas de 1000 objetos do R2 e 450 ids) contra os 10 ms do plano gratuito.
-5. O `observability` está ligado sem os registos de invocação (o token de um link de partilha vai no caminho do URL): confirmar que os registos mostram o relatório do cron e os erros e que não mostram URLs.
+5. O `observability` está ligado sem os registos de invocação (o token de um link de partilha vai no caminho do URL). **Confirmado** (2026-10-11): os registos mostram o relatório do cron e não mostram pedidos nem URLs; falta ver um erro (`console.error`) a aparecer.
 
 ### Confirmados em produção (2026-10-11)
 
