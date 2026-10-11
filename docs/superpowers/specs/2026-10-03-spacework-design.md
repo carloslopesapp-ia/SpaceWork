@@ -240,8 +240,12 @@ Recuperação de senha por email (e, por isso, o admin **não** consegue repor a
 
 ### Por confirmar em produção
 
-1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. Não é medível em local. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês). O valor de 100 000 como teto de iterações do WebCrypto do Workers também só se confirma em produção.
+1. Custo de CPU do PBKDF2 (100 000 iterações) face aos 10 ms do plano gratuito. **O login e o registo correm em produção sem o erro de limite de CPU** (confirmado a 2026-10-11, e 100 000 é aceite como número de iterações); falta o percentil 99 do tempo de CPU em Métrica. Se não couber, é preciso o plano pago do Workers (cerca de 5 USD/mês).
 2. Cookies com `Secure` em `localhost` no Safari (decidido por pedido HTTPS ou não).
 3. Tamanho dos lotes do cron no plano gratuito (máximo de 50 subpedidos por invocação; o desenho do Plano 4 gasta 32 no pior caso: confirmar em produção que a contagem é a esperada e que o gatilho de hora a hora corre).
 4. O gatilho do cron devolve a promessa da manutenção (`async scheduled`): confirmar no painel da Cloudflare que uma execução com erro aparece como falhada, e medir o CPU da pior execução (4 páginas de 1000 objetos do R2 e 450 ids) contra os 10 ms do plano gratuito.
 5. O `observability` está ligado sem os registos de invocação (o token de um link de partilha vai no caminho do URL): confirmar que os registos mostram o relatório do cron e os erros e que não mostram URLs.
+
+### Confirmados em produção (2026-10-11)
+
+Ver o [guia do deploy](../plans/2026-10-11-05b-deploy.md): o `public/_headers` (a CSP, `X-Frame-Options`, `Referrer-Policy`, `nosniff`) é aplicado às páginas pelos assets do Worker; a API leva `Cache-Control: no-store` e não leva CSP; as rotas autenticadas sem sessão dão 401; o *fallback* da SPA serve `/s/<token>`; o deploy automático por push para `main` funciona; o registo por aprovação funciona. As migrações da D1 não correm sozinhas: aplicam-se antes do push que traz o código que as usa.
