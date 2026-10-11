@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "spacework",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "bd61f5d5-1fa7-4cc9-8fb6-4e1a96e80e44",
       "migrations_dir": "migrations"
     }
   ],
