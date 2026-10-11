@@ -7,7 +7,7 @@ import { useMe } from "./auth";
 import { apiError, json, ME, mockApi, noContent } from "./test/mock-api";
 import { queryWrapper, testQueryClient } from "./test/render";
 
-const ANA: AdminUser = { id: "u 1", email: "ana@example.com", role: "user", status: "active", quotaBytes: 100, usedBytes: 10, createdAt: 1 };
+const ANA: AdminUser = { id: "u 1", email: "ana@example.com", role: "user", status: "active", approved: true, quotaBytes: 100, usedBytes: 10, createdAt: 1 };
 
 describe("useAdminUsers", () => {
   it("devolve as contas", async () => {

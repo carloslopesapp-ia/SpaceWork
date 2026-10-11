@@ -4,7 +4,7 @@ import type { AdminUser } from "../src/shared/types";
 import { MAX_QUOTA_BYTES } from "../src/shared/validation";
 import { app } from "../src/worker/app";
 import { runMaintenance } from "../src/worker/cron";
-import { insertUser, login, registerAdmin, registerUser } from "./auth-helpers";
+import { insertUser, login, registerAdmin, registerPending, registerUser } from "./auth-helpers";
 import { dbWithBatchHook, dbWithStatementHook, fetchWithEnv } from "./db-helpers";
 import { uploadFile, uploadOk, usedBytes } from "./file-helpers";
 import { api, buildRequest, resetState, sessionCookie } from "./helpers";
@@ -62,8 +62,26 @@ describe("GET /api/admin/users", () => {
     expect(users[1].status).toBe("deleting");
     expect(users[2]).toMatchObject({ role: "admin", status: "active", id: admin.user.id });
     for (const user of users) {
-      expect(Object.keys(user).sort()).toEqual(["createdAt", "email", "id", "quotaBytes", "role", "status", "usedBytes"]);
+      expect(Object.keys(user).sort()).toEqual(["approved", "createdAt", "email", "id", "quotaBytes", "role", "status", "usedBytes"]);
     }
+  });
+
+  it("mostra primeiro as contas por aprovar (da mais antiga para a mais recente) e marca `approved`", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    await insertUser("velha@example.com", { createdAt: 5 });
+    const bob = await registerPending("bob@example.com");
+    const eva = await registerPending("eva@example.com");
+    await env.DB.prepare("UPDATE users SET created_at = 20 WHERE id = ?1").bind(bob.id).run();
+    await env.DB.prepare("UPDATE users SET created_at = 10 WHERE id = ?1").bind(eva.id).run();
+
+    const users = await listUsers(admin.cookie);
+
+    expect(users.map((user) => [user.email, user.approved])).toEqual([
+      ["eva@example.com", false],
+      ["bob@example.com", false],
+      ["velha@example.com", true],
+      ["admin@example.com", true],
+    ]);
   });
 
   it("mostra o espaço usado que o upload acumulou", async () => {
@@ -129,6 +147,58 @@ describe("PATCH /api/admin/users/:id: quota", () => {
     const busy = await patch(admin.cookie, deleting, { quotaBytes: 1 });
     expect(busy.status).toBe(409);
     expect(await busy.json()).toMatchObject({ error: "account_deleting" });
+  });
+});
+
+describe("PATCH /api/admin/users/:id: aprovar", () => {
+  it("`approved: true` aprova a conta, que passa a entrar, e o contador de contas por aprovar baixa", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerPending("ana@example.com", "senha-segura-123");
+    const pendingOf = async () =>
+      ((await (await api("/api/auth/me", { cookie: admin.cookie })).json()) as { user: { pendingApprovals: number } }).user.pendingApprovals;
+    expect(await pendingOf()).toBe(1);
+    expect((await login("ana@example.com", "senha-segura-123")).status).toBe(403);
+
+    const res = await patch(admin.cookie, ana.id, { approved: true });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { user: AdminUser }).user).toMatchObject({ email: "ana@example.com", approved: true, status: "active" });
+    expect((await login("ana@example.com", "senha-segura-123")).status).toBe(200);
+    expect(await pendingOf()).toBe(0);
+  });
+
+  it("é idempotente e pode ir com a quota no mesmo pedido", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerPending("ana@example.com");
+
+    const first = await patch(admin.cookie, ana.id, { approved: true, quotaBytes: 42 });
+    expect(((await first.json()) as { user: AdminUser }).user).toMatchObject({ approved: true, quotaBytes: 42 });
+    const second = await patch(admin.cookie, ana.id, { approved: true });
+
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { user: AdminUser }).user).toMatchObject({ approved: true, quotaBytes: 42 });
+  });
+
+  it("só aceita `approved: true`: a aprovação não se desfaz (para parar uma conta, suspende-se)", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerUser("ana@example.com");
+    for (const approved of [false, 0, 1, "true", null]) {
+      const res = await patch(admin.cookie, ana.user.id, { approved });
+      expect(res.status, JSON.stringify(approved)).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_approved" });
+    }
+    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.user.id).first()).toEqual({ approved: 1 });
+  });
+
+  it("uma conta em remoção não se aprova (409)", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerPending("ana@example.com");
+    await env.DB.prepare("UPDATE users SET status = 'deleting' WHERE id = ?1").bind(ana.id).run();
+
+    const res = await patch(admin.cookie, ana.id, { approved: true });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "account_deleting" });
   });
 });
 
@@ -229,6 +299,32 @@ describe("DELETE /api/admin/users/:id", () => {
     expect((await listUsers(admin.cookie)).find((user) => user.id === ana.user.id)?.status).toBe("deleting");
     // os ficheiros ainda lá estão: quem os apaga é o cron
     expect((await env.FILES.list({ prefix: `u/${ana.user.id}/` })).objects).toHaveLength(1);
+  });
+
+  it("rejeitar uma conta por aprovar apaga-a de imediato (não tem ficheiros nem sessões) e liberta o email", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerPending("ana@example.com");
+
+    const res = await remove(admin.cookie, ana.id);
+
+    expect(res.status).toBe(204);
+    expect(await statusOf(ana.id)).toBeUndefined(); // a linha desapareceu: não ficou em `deleting` à espera do cron
+    expect((await listUsers(admin.cookie)).map((user) => user.email)).toEqual(["admin@example.com"]);
+    await registerPending("ana@example.com"); // o email ficou livre já
+  });
+
+  it("«Rejeitar» a competir com «Aprovar»: a conta aprovada entre a leitura e a escrita passa a `deleting` em vez de desaparecer", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const ana = await registerPending("ana@example.com");
+    const db = dbWithBatchHook(async (_call, runReal) => {
+      await env.DB.prepare("UPDATE users SET approved = 1 WHERE id = ?1").bind(ana.id).run(); // outro administrador aprovou
+      return runReal();
+    });
+
+    const res = await fetchWithEnv(buildRequest(`/api/admin/users/${ana.id}`, { method: "DELETE", cookie: admin.cookie }), { DB: db });
+
+    expect(res.status).toBe(204);
+    expect(await statusOf(ana.id)).toBe("deleting"); // aprovada, por isso segue o caminho normal (o cron remove-a)
   });
 
   it("é idempotente, não apaga administradores e responde 404 a quem não existe", async () => {

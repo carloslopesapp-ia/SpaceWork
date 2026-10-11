@@ -100,6 +100,8 @@ export interface AdminUser {
   email: string;
   role: Role;
   status: UserStatus;
+  /** `false`: a conta aguarda que um administrador a aprove (registo por aprovação) e ainda não entra. */
+  approved: boolean;
   quotaBytes: number;
   usedBytes: number;
   createdAt: number;

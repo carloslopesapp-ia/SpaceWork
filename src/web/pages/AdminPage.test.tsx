@@ -8,10 +8,10 @@ import { renderApp } from "../test/render";
 const CREATED = new Date(2026, 9, 3, 12).getTime();
 const ADMIN_ME = { ...ME, id: "adm", email: "admin@example.com", role: "admin" as const, quotaBytes: 10_737_418_240 };
 
-const ADMIN: AdminUser = { id: "adm", email: "admin@example.com", role: "admin", status: "active", quotaBytes: 10_737_418_240, usedBytes: 0, createdAt: CREATED };
-const ANA: AdminUser = { id: "u1", email: "ana@example.com", role: "user", status: "active", quotaBytes: 1_073_741_824, usedBytes: 536_870_912, createdAt: CREATED + 1000 };
-const BOB: AdminUser = { id: "u2", email: "bob@example.com", role: "user", status: "suspended", quotaBytes: 1_073_741_824, usedBytes: 1536, createdAt: CREATED + 2000 };
-const EVA: AdminUser = { id: "u3", email: "eva@example.com", role: "user", status: "deleting", quotaBytes: 1_073_741_824, usedBytes: 0, createdAt: CREATED + 3000 };
+const ADMIN: AdminUser = { id: "adm", email: "admin@example.com", role: "admin", status: "active", approved: true, quotaBytes: 10_737_418_240, usedBytes: 0, createdAt: CREATED };
+const ANA: AdminUser = { id: "u1", email: "ana@example.com", role: "user", status: "active", approved: true, quotaBytes: 1_073_741_824, usedBytes: 536_870_912, createdAt: CREATED + 1000 };
+const BOB: AdminUser = { id: "u2", email: "bob@example.com", role: "user", status: "suspended", approved: true, quotaBytes: 1_073_741_824, usedBytes: 1536, createdAt: CREATED + 2000 };
+const EVA: AdminUser = { id: "u3", email: "eva@example.com", role: "user", status: "deleting", approved: true, quotaBytes: 1_073_741_824, usedBytes: 0, createdAt: CREATED + 3000 };
 
 function serve(users: AdminUser[], extra: Parameters<typeof mockApi>[0] = {}) {
   return mockApi({

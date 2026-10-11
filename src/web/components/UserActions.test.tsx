@@ -6,7 +6,7 @@ import { apiError, json, mockApi } from "../test/mock-api";
 import { queryWrapper, testQueryClient } from "../test/render";
 import { UserActions } from "./UserActions";
 
-const ANA: AdminUser = { id: "u1", email: "ana@example.com", role: "user", status: "active", quotaBytes: 1_073_741_824, usedBytes: 536_870_912, createdAt: 1 };
+const ANA: AdminUser = { id: "u1", email: "ana@example.com", role: "user", status: "active", approved: true, quotaBytes: 1_073_741_824, usedBytes: 536_870_912, createdAt: 1 };
 const MENU = "Ações para a conta ana@example.com";
 
 function setup(user: AdminUser = ANA) {
