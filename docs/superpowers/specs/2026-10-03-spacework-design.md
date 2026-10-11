@@ -38,6 +38,8 @@ Bindings: `DB` (D1), `FILES` (R2). Variáveis de configuração:
 | `SESSION_TTL_DAYS` | 14 |
 | `REGISTRATION_OPEN` | true |
 
+`REGISTRATION_OPEN` tem três valores: `true` (registo aberto; sem a variável também está aberto), `approval` (registo aberto, mas as contas novas ficam **por aprovar** até um administrador as ativar) e qualquer outro valor (registo fechado).
+
 Mesma origem para frontend e API: não há CORS e os cookies de sessão são simples.
 
 **Decisão central:** no R2 a chave de cada ficheiro é opaca, `u/{userId}/{fileId}`, sem nome nem caminho. Pastas, nomes e hierarquia vivem só na D1. Mover e renomear são, por isso, operações exclusivamente na base de dados, sem copiar bytes.
@@ -50,7 +52,7 @@ TypeScript em todo o código. Backend: Hono. Frontend: React, React Router, TanS
 
 IDs: `crypto.randomUUID()` (texto). Datas: inteiros (milissegundos Unix). As chaves estrangeiras estão ativas (por defeito na D1) e servem de rede de segurança.
 
-**`users`**: `id`, `email` (único, minúsculas), `password_hash`, `role` (`admin` | `user`), `status` (`active` | `suspended` | `deleting`), `quota_bytes`, `used_bytes` (por defeito 0), `created_at`.
+**`users`**: `id`, `email` (único, minúsculas), `password_hash`, `role` (`admin` | `user`), `status` (`active` | `suspended` | `deleting`), `approved` (0 ou 1; por defeito 1: só o registo por aprovação cria contas com 0), `quota_bytes`, `used_bytes` (por defeito 0), `created_at`.
 `password_hash` tem o formato `pbkdf2-sha256$<iterações>$<salt_b64>$<hash_b64>`.
 
 **`sessions`**: `token_hash` (PK, SHA-256 do token), `user_id`, `created_at`, `expires_at`.
@@ -153,16 +155,16 @@ Todas as rotas autenticadas exigem sessão, exceto as de registo, login e as pú
 
 | Área | Rotas |
 |---|---|
-| Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` (inclui uso e quota), `POST /api/auth/password` (senha atual + nova; termina as outras sessões) |
+| Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` (inclui uso e quota; para um administrador, também `pendingApprovals`, o número de contas por aprovar), `POST /api/auth/password` (senha atual + nova; termina as outras sessões) |
 | Pastas | `GET /api/folders/:id/contents` (`id` = `root` para a raiz), `GET /api/folders/tree`, `POST /api/folders`, `PATCH /api/folders/:id` (renomear e/ou mover), `DELETE /api/folders/:id` |
 | Ficheiros | `PUT /api/files`, `PATCH /api/files/:id` (renomear e/ou mover), `DELETE /api/files/:id` (vai para a lixeira), `GET /api/files/:id/download`, `GET /api/files/:id/preview` (com suporte a `Range`) |
 | Lixeira | `GET /api/trash`, `POST /api/trash/:id/restore`, `DELETE /api/trash/:id`, `DELETE /api/trash` |
 | Partilha | `POST /api/files/:id/shares`, `GET /api/files/:id/shares`, `DELETE /api/shares/:id` |
 | Público | `GET /api/public/shares/:token` (nome e tamanho), `GET /api/public/shares/:token/download` |
 | Pesquisa | `GET /api/search?q=` |
-| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/:id` (`quotaBytes`, inteiro de bytes entre 0 e 2^50, e/ou `status` entre `active` e `suspended`; na API os campos são em *camelCase*, e `quota_bytes` é a coluna da D1), `DELETE /api/admin/users/:id` |
+| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/:id` (`quotaBytes`, inteiro de bytes entre 0 e 2^50, e/ou `status` entre `active` e `suspended`, e/ou `approved: true` para aprovar uma conta; na API os campos são em *camelCase*, e `quota_bytes` é a coluna da D1), `DELETE /api/admin/users/:id` |
 
-Regras do admin: só `role = admin` acede a `/api/admin/*`. Contas com `role = admin` não podem ser suspensas nem apagadas através da API. Suspender também termina as sessões (ao reativar, as antigas não voltam a valer). Numa conta de admin só a quota se pode mudar (403 `admin_protected` para o resto), e uma conta em remoção já não se altera (409 `account_deleting`). Baixar a quota abaixo do que a conta já usa só impede novos uploads. Apagar um utilizador define `status = deleting` e termina as sessões dele, e é idempotente. A remoção dos ficheiros e das linhas é feita pelo cron (secção 7); **até lá o email continua ocupado**: registar-se com ele dá 409.
+Regras do admin: só `role = admin` acede a `/api/admin/*`. Contas com `role = admin` não podem ser suspensas nem apagadas através da API. Suspender também termina as sessões (ao reativar, as antigas não voltam a valer). A lista de contas mostra primeiro as por aprovar. Aprovar é idempotente e não se desfaz (para parar uma conta, suspende-se). Numa conta de admin só a quota se pode mudar (403 `admin_protected` para o resto), e uma conta em remoção já não se altera (409 `account_deleting`). Baixar a quota abaixo do que a conta já usa só impede novos uploads. Apagar um utilizador define `status = deleting` e termina as sessões dele, e é idempotente; uma conta **por aprovar** apaga-se de imediato (não tem ficheiros nem sessões) e liberta o email. A remoção dos ficheiros e das linhas das outras é feita pelo cron (secção 7); **até lá o email continua ocupado**: registar-se com ele dá 409.
 
 ## 7. Cron de manutenção (hora a hora)
 
@@ -179,11 +181,11 @@ Orçamento de subpedidos por execução, no pior caso: lixeira 13 (até 300 fich
 
 | Rota | Conteúdo |
 |---|---|
-| `/login`, `/registo` | Formulários de email e senha (o registo pede confirmação da senha). |
-| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master), Sair, e barra de uso. A caixa de pesquisa fica na barra lateral, em todas as páginas (Enter leva a `/pesquisa?q=`, com os resultados e o caminho de cada um). Cabeçalho com caminho da pasta (*breadcrumb*), "Nova pasta" e "Carregar". Lista de pastas e ficheiros com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
+| `/login`, `/registo` | Formulários de email e senha (o registo pede confirmação da senha). No registo por aprovação, depois de enviar, o ecrã diz que a conta aguarda a aprovação do administrador (sem entrar). |
+| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master; com o número de contas por aprovar, se houver), Sair, e barra de uso. A caixa de pesquisa fica na barra lateral, em todas as páginas (Enter leva a `/pesquisa?q=`, com os resultados e o caminho de cada um). Cabeçalho com caminho da pasta (*breadcrumb*), "Nova pasta" e "Carregar". Lista de pastas e ficheiros com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
 | `/lixeira` | Ficheiros excluídos: Restaurar, Eliminar definitivamente, Esvaziar lixeira. |
 | `/conta` | Alterar senha. |
-| `/admin` | Tabela de utilizadores (email, usado/quota, estado, data de criação); editar quota, suspender/reativar, apagar. |
+| `/admin` | Tabela de utilizadores (email, usado/quota, estado, data de criação); editar quota, suspender/reativar, apagar. As contas por aprovar vêm primeiro, com o estado «Aguarda aprovação», e só têm **Aprovar** e **Rejeitar**. |
 | `/s/:token` | Página pública de download. |
 
 ## 9. Estrutura do repositório
@@ -217,7 +219,7 @@ docs/superpowers/     specs e planos
 
 1. Desenvolvimento local: `npm run dev` (D1 e R2 simulados, nada toca na conta Cloudflare).
 2. Produção, com passos feitos pelo utilizador onde envolvem a sua conta: `wrangler login`; criar bucket R2 e base D1; atualizar IDs em `wrangler.jsonc`; `wrangler d1 migrations apply --remote`; `seed:master --remote`; `wrangler deploy`.
-3. Resultado: URL `*.workers.dev`. Domínio próprio e deploy automático via GitHub ficam para depois.
+3. Resultado: URL `*.workers.dev`. Domínio próprio fica para depois. Com o repositório ligado à Cloudflare (Workers Builds), cada push para `main` faz o deploy; **as migrações da D1 não correm sozinhas**: uma migração nova tem de ser aplicada (`wrangler d1 migrations apply --remote`) **antes** do push que traz o código que a usa, ou o Worker novo falha contra a base antiga.
 
 ## 12. Fora do âmbito da v1
 
