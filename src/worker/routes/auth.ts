@@ -103,7 +103,8 @@ auth.post("/login", async (c) => {
   );
   if (!usable || !passwordOk) throw new ApiError(401, ...INVALID_CREDENTIALS);
 
-  // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja suspensa.
+  // Uma senha certa não é uma tentativa falhada, mesmo que a conta esteja por aprovar ou suspensa. «Por aprovar» vem antes de «suspensa»
+  // (uma conta por aprovar nunca chegou a entrar), e os dois só se revelam depois de a senha estar certa: com a errada o erro é o genérico.
   await clearFailures(db, email);
   if (row.approved === 0) {
     throw new ApiError(403, "account_pending", "A sua conta aguarda a aprovação do administrador.");

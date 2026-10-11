@@ -84,6 +84,7 @@ describe("POST /api/auth/login", () => {
     await registerPending("ana@example.com", "senha-segura-123");
     await login("ana@example.com", "errada-errada");
     await login("ana@example.com", "errada-errada");
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first()).toEqual({ n: 2 });
 
     expect((await login("ana@example.com", "senha-segura-123")).status).toBe(403);
 

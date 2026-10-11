@@ -181,13 +181,24 @@ describe("PATCH /api/admin/users/:id: aprovar", () => {
 
   it("só aceita `approved: true`: a aprovação não se desfaz (para parar uma conta, suspende-se)", async () => {
     const admin = await registerAdmin("admin@example.com");
-    const ana = await registerUser("ana@example.com");
+    const ana = await registerPending("ana@example.com");
     for (const approved of [false, 0, 1, "true", null]) {
-      const res = await patch(admin.cookie, ana.user.id, { approved });
+      const res = await patch(admin.cookie, ana.id, { approved });
       expect(res.status, JSON.stringify(approved)).toBe(400);
       expect(await res.json()).toMatchObject({ error: "invalid_approved" });
     }
-    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.user.id).first()).toEqual({ approved: 1 });
+    expect(await env.DB.prepare("SELECT approved FROM users WHERE id = ?1").bind(ana.id).first()).toEqual({ approved: 0 }); // continua por aprovar
+  });
+
+  it("uma conta de administrador não se aprova: `approved` dá o mesmo 403 `admin_protected` que o estado, também com a quota no pedido", async () => {
+    const admin = await registerAdmin("admin@example.com");
+    const other = await registerAdmin("outro@example.com");
+    for (const json of [{ approved: true }, { approved: true, quotaBytes: 42 }]) {
+      const res = await patch(admin.cookie, other.user.id, json);
+      expect(res.status, JSON.stringify(json)).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "admin_protected" });
+    }
+    expect((await listUsers(admin.cookie)).find((user) => user.id === other.user.id)?.quotaBytes).not.toBe(42); // nada mudou
   });
 
   it("uma conta em remoção não se aprova (409)", async () => {

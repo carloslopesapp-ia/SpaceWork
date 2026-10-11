@@ -61,10 +61,10 @@ admin.get("/users", async (c) => {
 
 /**
  * Muda a quota (`quotaBytes`, em bytes), o estado (`status`: `active` ou `suspended`) e/ou aprova a conta (`approved: true`, que não se
- * desfaz: para parar uma conta, suspende-se). Uma quota abaixo do uso atual só
- * impede novos uploads. Suspender termina as sessões na mesma `batch` do `UPDATE`: o filtro `status = 'active'` da autenticação não chega,
- * porque ao reativar a conta as sessões antigas voltariam a valer. Uma conta de administrador não se suspende (a quota pode mudar-se) e
- * uma conta em remoção não se mexe.
+ * desfaz: para parar uma conta, suspende-se). Uma quota abaixo do uso atual só impede novos uploads. Suspender termina as sessões na
+ * mesma `batch` do `UPDATE`: o filtro `status = 'active'` da autenticação não chega, porque ao reativar a conta as sessões antigas
+ * voltariam a valer. Numa conta de administrador só a quota se muda (o estado e a aprovação dão 403 `admin_protected`) e uma conta
+ * em remoção não se mexe.
  */
 admin.patch("/users/:id", async (c) => {
   const db = c.env.DB;
@@ -86,7 +86,7 @@ admin.patch("/users/:id", async (c) => {
     throw new ApiError(400, "invalid_approved", "A aprovação só se pode dar: «approved» tem de ser true.");
   }
   if (target.status === "deleting") throw accountDeleting();
-  if (hasStatus && target.role === "admin") throw adminProtected();
+  if ((hasStatus || hasApproved) && target.role === "admin") throw adminProtected();
 
   const quota = hasQuota ? (body.quotaBytes as number) : null;
   const status = hasStatus ? (body.status as string) : null;
