@@ -31,14 +31,17 @@ function useAdminMutation<Variables, Data = void>(mutationFn: (variables: Variab
   });
 }
 
-/** Muda a quota (em bytes) e/ou o estado (`active` ou `suspended`) de uma conta. */
+/** Muda a quota (em bytes) e/ou o estado (`active` ou `suspended`) de uma conta, ou aprova-a (`approved: true`; a aprovação não se desfaz). */
 export function useUpdateUser() {
-  return useAdminMutation(({ id, ...changes }: { id: string; quotaBytes?: number; status?: "active" | "suspended" }) =>
+  return useAdminMutation(({ id, ...changes }: { id: string; quotaBytes?: number; status?: "active" | "suspended"; approved?: true }) =>
     apiFetch<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(id)}`, { method: "PATCH", json: changes }),
   );
 }
 
-/** Apaga uma conta: passa a «em remoção» e o cron elimina-a (os ficheiros e o utilizador) na hora seguinte. */
+/**
+ * Apaga uma conta: passa a «em remoção» e o cron elimina-a (os ficheiros e o utilizador) na hora seguinte. Uma conta por aprovar
+ * (rejeitar o pedido) apaga-se logo, porque não tem ficheiros.
+ */
 export function useDeleteUser() {
   return useAdminMutation((id: string) => apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" }));
 }

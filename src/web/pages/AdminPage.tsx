@@ -9,6 +9,7 @@ import { Button } from "../components/Button";
 import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { UsageBar } from "../components/UsageBar";
+import { PendingActions } from "../components/PendingActions";
 import { UserActions } from "../components/UserActions";
 
 const STATUS_LABEL: Record<UserStatus, string> = { active: "Ativa", suspended: "Suspensa", deleting: "A remover" };
@@ -17,6 +18,10 @@ const STATUS_STYLE: Record<UserStatus, string> = {
   suspended: "bg-amber-50 text-amber-800",
   deleting: "bg-slate-100 text-slate-600",
 };
+
+/** O estado que a linha mostra: uma conta por aprovar ainda não tem estado de utilização. */
+const PENDING_LABEL = "Aguarda aprovação";
+const PENDING_STYLE = "bg-indigo-50 text-indigo-700";
 
 function UserRow({ user, isSelf, actions }: { user: AdminUser; isSelf: boolean; actions?: ReactNode }) {
   return (
@@ -40,7 +45,11 @@ function UserRow({ user, isSelf, actions }: { user: AdminUser; isSelf: boolean; 
         <UsageBar usedBytes={user.usedBytes} quotaBytes={user.quotaBytes} label={`Espaço usado por ${user.email}`} />
       </td>
       <td className="px-4 py-3">
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[user.status]}`}>{STATUS_LABEL[user.status]}</span>
+        {user.approved ? (
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[user.status]}`}>{STATUS_LABEL[user.status]}</span>
+        ) : (
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PENDING_STYLE}`}>{PENDING_LABEL}</span>
+        )}
       </td>
       <td className="px-4 py-3 whitespace-nowrap text-slate-600">{formatDate(user.createdAt)}</td>
       <td className="w-12 px-4 py-3">{actions}</td>
@@ -67,6 +76,8 @@ export default function AdminPage() {
     );
   }
 
+  const pending = users.data.filter((user) => !user.approved).length;
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -78,6 +89,11 @@ export default function AdminPage() {
       <p className="mt-2 text-sm text-slate-600">
         {users.data.length} {users.data.length === 1 ? "conta" : "contas"}. Uma conta apagada passa a «A remover» e a manutenção por hora elimina-a, com os ficheiros.
       </p>
+      {pending > 0 && (
+        <p className="mt-2 text-sm font-medium text-indigo-700">
+          {pending === 1 ? "1 conta aguarda a sua aprovação." : `${pending} contas aguardam a sua aprovação.`}
+        </p>
+      )}
       {users.isError && (
         <div className="mt-4">
           <Message kind="error">{errorMessage(users.error)}</Message>
@@ -112,7 +128,7 @@ export default function AdminPage() {
                 key={user.id}
                 user={user}
                 isSelf={user.id === me.data?.id}
-                actions={user.status === "deleting" ? undefined : <UserActions user={user} />}
+                actions={user.status === "deleting" ? undefined : user.approved ? <UserActions user={user} /> : <PendingActions user={user} />}
               />
             ))}
           </tbody>

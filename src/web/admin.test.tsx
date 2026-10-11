@@ -50,6 +50,26 @@ describe("mutações do painel", () => {
     });
   });
 
+  it("aprovar uma conta envia `approved: true` e refaz a lista e a sessão (o contador de contas por aprovar da barra lateral)", async () => {
+    const server = mockApi({
+      "GET /api/admin/users": () => json({ users: [ANA] }),
+      "GET /api/auth/me": () => json({ user: ME }),
+      "PATCH /api/admin/users/:id": () => json({ user: ANA }),
+    });
+    const hook = renderHook(() => ({ users: useAdminUsers(), me: useMe(), update: useUpdateUser() }), { wrapper: queryWrapper(testQueryClient()) });
+    await waitFor(() => expect(hook.result.current.users.isSuccess && hook.result.current.me.isSuccess).toBe(true));
+
+    await act(async () => {
+      await hook.result.current.update.mutateAsync({ id: "u 1", approved: true });
+    });
+
+    expect(server.callsTo("PATCH /api/admin/users/:id")[0]).toMatchObject({ path: "/api/admin/users/u%201", body: { approved: true } });
+    await waitFor(() => {
+      expect(server.callsTo("GET /api/admin/users").length).toBeGreaterThanOrEqual(2);
+      expect(server.callsTo("GET /api/auth/me").length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   it("apagar usa DELETE com o id codificado e refaz a lista; um erro também a refaz", async () => {
     let fail = false;
     const server = mockApi({

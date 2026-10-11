@@ -13,6 +13,9 @@ const ANA: AdminUser = { id: "u1", email: "ana@example.com", role: "user", statu
 const BOB: AdminUser = { id: "u2", email: "bob@example.com", role: "user", status: "suspended", approved: true, quotaBytes: 1_073_741_824, usedBytes: 1536, createdAt: CREATED + 2000 };
 const EVA: AdminUser = { id: "u3", email: "eva@example.com", role: "user", status: "deleting", approved: true, quotaBytes: 1_073_741_824, usedBytes: 0, createdAt: CREATED + 3000 };
 
+const NOVA: AdminUser = { id: "u4", email: "nova@example.com", role: "user", status: "active", approved: false, quotaBytes: 1_073_741_824, usedBytes: 0, createdAt: CREATED + 4000 };
+const OUTRA: AdminUser = { id: "u5", email: "outra@example.com", role: "user", status: "active", approved: false, quotaBytes: 1_073_741_824, usedBytes: 0, createdAt: CREATED + 5000 };
+
 function serve(users: AdminUser[], extra: Parameters<typeof mockApi>[0] = {}) {
   return mockApi({
     ...SESSION,
@@ -154,5 +157,79 @@ describe("AdminPage: ações", () => {
     expect(server.callsTo("PATCH /api/admin/users/:id")[0].body).toEqual({ quotaBytes: 21_474_836_480 });
     // a barra lateral (a sessão foi refeita) e a tabela mostram a quota nova
     await waitFor(() => expect(screen.getAllByText("0 B de 20 GB")).toHaveLength(2));
+  });
+});
+
+describe("AdminPage: contas por aprovar", () => {
+  it("mostra «Aguarda aprovação» e só «Aprovar» e «Rejeitar…» nessas contas, e diz quantas são", async () => {
+    serve([NOVA, OUTRA, ADMIN, ANA]);
+    renderApp("/admin");
+
+    expect(await screen.findByText("2 contas aguardam a sua aprovação.")).toBeInTheDocument();
+    const rows = screen.getAllByRole("row").slice(1);
+    const nova = rows[0];
+    expect(within(nova).getByText("nova@example.com")).toBeInTheDocument();
+    expect(within(nova).getByText("Aguarda aprovação")).toBeInTheDocument();
+    expect(within(nova).getByRole("button", { name: "Aprovar a conta nova@example.com" })).toBeInTheDocument();
+    expect(within(nova).getByRole("button", { name: "Rejeitar o pedido de nova@example.com" })).toBeInTheDocument();
+    expect(within(nova).queryByRole("button", { name: /^Ações para a conta/ })).not.toBeInTheDocument();
+    // as outras contas continuam com o menu de sempre
+    expect(within(rows[3]).getByRole("button", { name: "Ações para a conta ana@example.com" })).toBeInTheDocument();
+  });
+
+  it("no singular a mensagem concorda", async () => {
+    serve([NOVA, ADMIN]);
+    renderApp("/admin");
+    expect(await screen.findByText("1 conta aguarda a sua aprovação.")).toBeInTheDocument();
+  });
+
+  it("sem contas por aprovar não aparece a mensagem", async () => {
+    serve([ADMIN, ANA]);
+    renderApp("/admin");
+    await screen.findByRole("heading", { name: "Utilizadores" });
+    expect(screen.queryByText(/aguarda(m)? a sua aprovação/)).not.toBeInTheDocument();
+  });
+
+  it("aprovar passa a conta a «Ativa», com o menu normal, e o contador da barra lateral baixa", async () => {
+    let approved = false;
+    const server = serve([], {
+      "GET /api/auth/me": () => json({ user: { ...ADMIN_ME, pendingApprovals: approved ? 0 : 1 } }),
+      "GET /api/admin/users": () => json({ users: [approved ? { ...NOVA, approved: true } : NOVA, ADMIN] }),
+      "PATCH /api/admin/users/:id": () => {
+        approved = true;
+        return json({ user: { ...NOVA, approved: true } });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/admin");
+    expect(await screen.findByRole("link", { name: "Admin, 1 conta por aprovar" })).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "Aprovar a conta nova@example.com" }));
+
+    const row = (await screen.findByRole("button", { name: "Ações para a conta nova@example.com" })).closest("tr")!;
+    expect(within(row).getByText("Ativa")).toBeInTheDocument();
+    expect(within(row).queryByText("Aguarda aprovação")).not.toBeInTheDocument();
+    expect(server.callsTo("PATCH /api/admin/users/:id")[0].body).toEqual({ approved: true });
+    expect(screen.queryByText(/aguarda(m)? a sua aprovação/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument();
+  });
+
+  it("rejeitar pede confirmação e a conta desaparece da lista", async () => {
+    let rejected = false;
+    const server = serve([], {
+      "GET /api/admin/users": () => json({ users: rejected ? [ADMIN] : [NOVA, ADMIN] }),
+      "DELETE /api/admin/users/:id": () => {
+        rejected = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/admin");
+    await user.click(await screen.findByRole("button", { name: "Rejeitar o pedido de nova@example.com" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Rejeitar pedido" })).getByRole("button", { name: "Rejeitar" }));
+
+    await waitFor(() => expect(screen.queryByText("nova@example.com")).not.toBeInTheDocument());
+    expect(server.callsTo("DELETE /api/admin/users/:id")[0].params).toEqual({ id: "u4" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
