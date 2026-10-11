@@ -13,7 +13,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 5A | [Endurecimento e testes de ponta a ponta](2026-10-05-05a-endurecimento-e-testes-e2e.md) | Cabeçalhos de segurança (CSP), registos sem tokens, o cron com falha visível, `REGISTRATION_OPEN`, a passagem de acessibilidade dos diálogos e menus, e a suíte Playwright (fumo, envios, partilha, admin, teclado) contra a aplicação construída | Concluído |
 | 5B | [Deploy](2026-10-11-05b-deploy.md) | Recursos na Cloudflare (D1, R2), `wrangler deploy`, o master em produção e o deploy automático por Git; o guia do que se fez e do que correu mal. Feito à mão com o dono (sem replay) | Concluído; faltam as medições que precisam da conta (o cron, o CPU) |
 | 6 | [Registo por aprovação](2026-10-11-06-registo-por-aprovacao.md) | `REGISTRATION_OPEN=approval`: as contas novas ficam por aprovar até um administrador as ativar (API, ecrã de registo e de login, painel com «Aprovar» e «Rejeitar…», contador na barra lateral) e a produção passa a usar esse modo | Concluído |
-| 7 | [Mosaico em «Meu espaço»](2026-10-11-07-mosaico.md) | O seletor «Lista \| Mosaico» (guardado no browser) e o mosaico de quadrados, com a imagem das fotos até 2 MB e o ícone e a extensão nos outros ficheiros | Escrito, por executar |
+| 7 | [Mosaico em «Meu espaço»](2026-10-11-07-mosaico.md) | O seletor «Lista \| Mosaico» (guardado no browser) e o mosaico de quadrados, com a imagem das fotos até 2 MB e o ícone e a extensão nos outros ficheiros | Concluído |
 
 ## Factos verificados que os planos seguintes devem respeitar
 
