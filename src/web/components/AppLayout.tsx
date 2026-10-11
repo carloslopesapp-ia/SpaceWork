@@ -11,6 +11,9 @@ import { SearchBox } from "./SearchBox";
 import { UploadPanel } from "./UploadPanel";
 import { UsageBar } from "./UsageBar";
 
+/** «2 contas por aprovar» / «1 conta por aprovar». */
+const pendingLabel = (count: number) => (count === 1 ? "1 conta por aprovar" : `${count} contas por aprovar`);
+
 function navClass({ isActive }: { isActive: boolean }): string {
   return `block rounded-lg px-3 py-2 text-sm font-medium ${
     isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-100"
@@ -95,6 +98,7 @@ export default function AppLayout() {
   }
   if (!me.data) return <Navigate to="/login" replace />;
   const user = me.data;
+  const pendingApprovals = user.pendingApprovals ?? 0;
 
   return (
     // `key`: se o `me` passar a outro utilizador no mesmo separador, a fila do anterior cancela-se (`cancelAll`).
@@ -116,8 +120,13 @@ export default function AppLayout() {
               Conta
             </NavLink>
             {user.role === "admin" && (
-              <NavLink to="/admin" className={navClass}>
+              <NavLink to="/admin" className={navClass} aria-label={pendingApprovals > 0 ? `Admin, ${pendingLabel(pendingApprovals)}` : undefined}>
                 Admin
+                {pendingApprovals > 0 && (
+                  <span aria-hidden="true" className="ml-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {pendingApprovals}
+                  </span>
+                )}
               </NavLink>
             )}
           </nav>

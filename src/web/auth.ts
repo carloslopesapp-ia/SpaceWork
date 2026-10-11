@@ -35,12 +35,18 @@ export function useLogin() {
   });
 }
 
+/** A resposta do registo: a conta entrou (registo aberto) ou ficou por aprovar (registo por aprovação: sem sessão). */
+export type RegisterResult = { user: PublicUser } | { pending: true; message: string };
+
 export function useRegister() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (credentials: Credentials) =>
-      apiFetch<{ user: PublicUser }>("/api/auth/register", { method: "POST", json: credentials }),
-    onSuccess: ({ user }) => queryClient.setQueryData(ME_KEY, user),
+      apiFetch<RegisterResult>("/api/auth/register", { method: "POST", json: credentials }),
+    // Por aprovar não há sessão: não se mexe na cache da sessão, e a página mostra a mensagem do servidor.
+    onSuccess: (result) => {
+      if ("user" in result) queryClient.setQueryData(ME_KEY, result.user);
+    },
   });
 }
 

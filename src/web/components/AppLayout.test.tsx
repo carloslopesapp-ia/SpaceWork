@@ -282,3 +282,25 @@ describe("AppLayout: enquanto a sessão carrega", () => {
     await screen.findByRole("navigation", { name: "Principal" });
   });
 });
+
+describe("AppLayout: contas por aprovar", () => {
+  const ADMIN_ME = { ...ME, id: "adm", email: "admin@example.com", role: "admin" as const };
+  const adminLinkName = async (pendingApprovals?: number) => {
+    mockApi({ ...CONTENTS, "GET /api/config": SESSION["GET /api/config"], "GET /api/auth/me": () => json({ user: { ...ADMIN_ME, pendingApprovals } }) });
+    renderApp("/");
+    await screen.findByRole("navigation", { name: "Principal" });
+    return within(screen.getByRole("navigation", { name: "Principal" })).getByRole("link", { name: /^Admin/ }).getAttribute("aria-label") ?? "Admin";
+  };
+
+  it("«Admin» diz quantas contas aguardam aprovação, no plural e no singular", async () => {
+    expect(await adminLinkName(2)).toBe("Admin, 2 contas por aprovar");
+    cleanup();
+    expect(await adminLinkName(1)).toBe("Admin, 1 conta por aprovar");
+  });
+
+  it("sem contas por aprovar (zero, ou o campo em falta) «Admin» fica como estava", async () => {
+    expect(await adminLinkName(0)).toBe("Admin");
+    cleanup();
+    expect(await adminLinkName(undefined)).toBe("Admin");
+  });
+});

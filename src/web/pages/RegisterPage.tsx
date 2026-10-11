@@ -33,6 +33,28 @@ export default function RegisterPage() {
 
   const error = localError ?? register.error?.message ?? null;
 
+  // Registo por aprovação: a conta existe mas ainda não entra, por isso o formulário dá lugar à mensagem do servidor.
+  if (register.data && "pending" in register.data) {
+    return (
+      <AuthCard
+        title="Conta criada"
+        footer={
+          <>
+            Já tem conta?{" "}
+            <Link to="/login" className="font-medium text-indigo-600 hover:underline">
+              Entrar
+            </Link>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Message kind="success">{register.data.message}</Message>
+          <p className="text-sm text-slate-600">Quando o administrador a aprovar, entre com o seu email e a sua senha.</p>
+        </div>
+      </AuthCard>
+    );
+  }
+
   return (
     <AuthCard
       title="Criar conta"
