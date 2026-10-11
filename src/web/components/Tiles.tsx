@@ -1,0 +1,92 @@
+import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
+import { formatBytes } from "../../shared/format";
+import { previewContentType } from "../../shared/preview";
+import type { FileItem, FolderItem } from "../../shared/types";
+import { extensionLabel, showsThumbnail } from "../thumbnails";
+import { FileActions } from "./FileActions";
+import { FolderActions } from "./FolderActions";
+import { FileIcon, FolderIcon } from "./icons";
+import { PreviewDialog } from "./PreviewDialog";
+
+// Sem `overflow-hidden` no quadrado: o menu «⋮» abre-se por cima do que está à volta e seria cortado. O corte é só no rosto.
+const TILE = "relative flex flex-col rounded-xl border border-slate-200 bg-white hover:border-indigo-300";
+const FACE =
+  "flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300";
+
+function Caption({ name, detail, actions }: { name: string; detail: string; actions: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1 border-t border-slate-100 py-1 pr-1 pl-3">
+      <span className="min-w-0 flex-1">
+        <span title={name} className="block truncate text-sm font-medium text-slate-900">
+          {name}
+        </span>
+        <span className="block truncate text-xs text-slate-500">{detail}</span>
+      </span>
+      <span className="shrink-0">{actions}</span>
+    </div>
+  );
+}
+
+/** Uma pasta no mosaico: o ícone, que é uma ligação para a pasta, o nome e o menu «⋮». */
+export function FolderTile({ folder }: { folder: FolderItem }) {
+  return (
+    <li className={TILE}>
+      <Link to={`/pasta/${folder.id}`} aria-label={`Abrir a pasta ${folder.name}`} className={FACE}>
+        <FolderIcon large />
+      </Link>
+      <Caption name={folder.name} detail="Pasta" actions={<FolderActions folder={folder} />} />
+    </li>
+  );
+}
+
+/**
+ * Um ficheiro no mosaico. As imagens pequenas mostram a própria imagem (carregada só quando o quadrado aparece no ecrã); os outros
+ * ficheiros, o ícone e a extensão. Se o ficheiro se pré-visualiza, o quadrado é um botão que abre a pré-visualização.
+ */
+export function FileTile({ file }: { file: FileItem }) {
+  const [previewing, setPreviewing] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const canPreview = previewContentType(file.name) !== null;
+  const openPreview = () => setPreviewing(true);
+  const extension = extensionLabel(file.name);
+
+  const face =
+    showsThumbnail(file) && !thumbnailFailed ? (
+      // `alt` vazio: o nome do ficheiro já está por baixo.
+      <img
+        src={`/api/files/${encodeURIComponent(file.id)}/preview`}
+        alt=""
+        loading="lazy"
+        onError={() => setThumbnailFailed(true)}
+        className="h-full w-full object-cover"
+      />
+    ) : (
+      <span className="flex flex-col items-center gap-1">
+        <FileIcon large />
+        {extension && <span className="text-xs font-semibold text-slate-500">{extension}</span>}
+      </span>
+    );
+
+  return (
+    <li className={TILE}>
+      {canPreview ? (
+        <button type="button" aria-label={`Pré-visualizar ${file.name}`} onClick={openPreview} className={FACE}>
+          {face}
+        </button>
+      ) : (
+        <div className={FACE}>{face}</div>
+      )}
+      <Caption
+        name={file.name}
+        detail={formatBytes(file.size)}
+        actions={
+          <>
+            <FileActions file={file} onPreview={canPreview ? openPreview : undefined} />
+            {previewing && <PreviewDialog file={file} onClose={() => setPreviewing(false)} />}
+          </>
+        }
+      />
+    </li>
+  );
+}

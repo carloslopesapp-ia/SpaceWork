@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { FolderContents } from "../../shared/types";
 import { CONFIG_KEY } from "../space";
 import { stubXhr } from "../test/fake-xhr";
@@ -431,5 +431,67 @@ describe("FolderPage: envio e pré-visualização", () => {
     await user.click(await screen.findByRole("button", { name: "Ações para o ficheiro relatório.pdf" }));
     await user.click(screen.getByRole("menuitem", { name: "Pré-visualizar" }));
     expect(screen.getByTitle("Pré-visualização de relatório.pdf")).toHaveAttribute("src", "/api/files/p1/preview");
+  });
+});
+
+describe("FolderPage: mosaico", () => {
+  beforeEach(() => localStorage.clear());
+
+  const WITH_IMAGES: FolderContents = {
+    ...ROOT,
+    files: [
+      ...ROOT.files,
+      { id: "p1", name: "pequena.png", folderId: null, size: 1000, mime: "image/png", createdAt: CREATED },
+      { id: "p2", name: "grande.png", folderId: null, size: 3 * 1024 * 1024, mime: "image/png", createdAt: CREATED },
+    ],
+  };
+
+  it("a lista é a vista por defeito, e «Mosaico» mostra os quadrados e guarda a escolha", async () => {
+    mockApi({ ...SESSION, "GET /api/folders/:id/contents": () => json(ROOT) });
+    const user = userEvent.setup();
+    renderApp("/");
+    await screen.findByRole("heading", { name: "Meu espaço" });
+    expect(screen.getByRole("button", { name: "Lista" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Fotos" })).toHaveAttribute("href", "/pasta/f1");
+
+    await user.click(screen.getByRole("button", { name: "Mosaico" }));
+
+    expect(screen.getByRole("button", { name: "Mosaico" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Abrir a pasta Fotos" })).toHaveAttribute("href", "/pasta/f1");
+    expect(screen.getByRole("button", { name: "Pré-visualizar relatório.pdf" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fotos" })).not.toBeInTheDocument(); // as linhas da lista já não estão
+    expect(localStorage.getItem("spacework:view-mode")).toBe("tiles");
+  });
+
+  it("começa pelo mosaico se foi a escolha guardada, e «Lista» volta às linhas", async () => {
+    localStorage.setItem("spacework:view-mode", "tiles");
+    mockApi({ ...SESSION, "GET /api/folders/:id/contents": () => json(ROOT) });
+    const user = userEvent.setup();
+    renderApp("/");
+    expect(await screen.findByRole("link", { name: "Abrir a pasta Fotos" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Lista" }));
+
+    expect(screen.getByRole("link", { name: "Fotos" })).toHaveAttribute("href", "/pasta/f1");
+    expect(screen.queryByRole("link", { name: "Abrir a pasta Fotos" })).not.toBeInTheDocument();
+  });
+
+  it("mostra a imagem das fotos pequenas e o ícone das grandes", async () => {
+    localStorage.setItem("spacework:view-mode", "tiles");
+    mockApi({ ...SESSION, "GET /api/folders/:id/contents": () => json(WITH_IMAGES) });
+    renderApp("/");
+
+    const small = (await screen.findByText("pequena.png")).closest("li")!;
+    expect(small.querySelector("img")).toHaveAttribute("src", "/api/files/p1/preview");
+    const big = screen.getByText("grande.png").closest("li")!;
+    expect(big.querySelector("img")).toBeNull();
+    expect(within(big).getByText("PNG")).toBeInTheDocument();
+  });
+
+  it("uma pasta vazia diz que está vazia, no mosaico também", async () => {
+    localStorage.setItem("spacework:view-mode", "tiles");
+    mockApi({ ...SESSION, "GET /api/folders/:id/contents": () => json({ folder: null, breadcrumb: [], folders: [], files: [] }) });
+    renderApp("/");
+    expect(await screen.findByText(/Esta pasta está vazia/)).toBeInTheDocument();
   });
 });

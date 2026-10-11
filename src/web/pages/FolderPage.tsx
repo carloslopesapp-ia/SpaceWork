@@ -7,10 +7,13 @@ import { FileRow, FolderRow } from "../components/ItemRows";
 import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
 import { NameDialog } from "../components/NameDialog";
+import { FileTile, FolderTile } from "../components/Tiles";
+import { ViewToggle } from "../components/ViewToggle";
 import { filesFromDrop } from "../dropped-files";
 import { useContents, useCreateFolder } from "../space";
 import { ROOT_LABEL } from "../tree";
 import { useUploadActions } from "../uploads-context";
+import { useViewMode } from "../view-mode";
 
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 /** Um diálogo aberto é do que está a decorrer: enquanto houver um, o que se larga não é para a zona de largar (o fundo do diálogo cobre o ecrã todo, por isso não basta olhar ao alvo do evento). */
@@ -25,6 +28,7 @@ export default function FolderPage() {
   const [creating, setCreating] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [view, setView] = useViewMode();
   const fileInput = useRef<HTMLInputElement>(null);
   // `dragenter`/`dragleave` disparam também ao passar por cima dos filhos: conta-se a profundidade.
   const dragDepth = useRef(0);
@@ -92,7 +96,8 @@ export default function FolderPage() {
       <Breadcrumb items={breadcrumb} />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <h1 className="min-w-0 text-2xl font-bold tracking-tight break-words">{folder?.name ?? ROOT_LABEL}</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewToggle value={view} onChange={setView} />
           <Button variant="secondary" onClick={() => setCreating(true)}>
             Nova pasta
           </Button>
@@ -130,6 +135,15 @@ export default function FolderPage() {
         <p className="mt-10 text-center text-slate-500">
           Esta pasta está vazia. Arraste ficheiros para aqui ou use «Carregar ficheiros».
         </p>
+      ) : view === "tiles" ? (
+        <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          {folders.map((item) => (
+            <FolderTile key={item.id} folder={item} />
+          ))}
+          {files.map((item) => (
+            <FileTile key={item.id} file={item} />
+          ))}
+        </ul>
       ) : (
         <ul className="mt-6 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
           {folders.map((item) => (
