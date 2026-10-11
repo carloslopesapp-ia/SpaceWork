@@ -29,6 +29,8 @@ describe("FileTile", () => {
     expect(image).toHaveAttribute("src", "/api/files/a1/preview");
     expect(image).toHaveAttribute("loading", "lazy");
     expect(image).toHaveAttribute("alt", ""); // o nome já está por baixo: a imagem é decorativa
+    expect(image).toHaveAttribute("draggable", "false"); // arrastá-la para a página enviaria uma cópia (o Chromium põe a imagem no que se arrasta)
+    expect(image).toHaveAttribute("decoding", "async");
     expect(screen.getByRole("button", { name: "Pré-visualizar foto.png" })).toBeInTheDocument();
     expect(screen.getByText("foto.png")).toBeInTheDocument();
     expect(screen.getByText("1000 B")).toBeInTheDocument();
@@ -46,6 +48,14 @@ describe("FileTile", () => {
     fireEvent.error(container.querySelector("img")!);
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("PNG")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pré-visualizar foto.png" })).toBeInTheDocument(); // o quadrado continua a abrir a pré-visualização
+  });
+
+  it("um ficheiro sem extensão mostra só o ícone, sem texto no quadrado", () => {
+    renderTile(<FileTile file={file("LEIAME", 10)} />);
+    const face = screen.getByText("LEIAME").closest("li")!.firstElementChild!; // o rosto é o primeiro filho do quadrado; o nome está na legenda
+    expect(face.textContent).toBe("");
+    expect(face.querySelector("svg")).not.toBeNull();
   });
 
   it("um ficheiro que não se pré-visualiza mostra o ícone e a extensão, e não é um botão", () => {
@@ -79,5 +89,12 @@ describe("FolderTile", () => {
     expect(screen.getByText("Fotos")).toBeInTheDocument();
     expect(screen.getByText("Pasta")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ações para a pasta Fotos" })).toBeInTheDocument();
+  });
+
+  it("o menu «⋮» da pasta abre-se com as ações da pasta", async () => {
+    mockApi({ "GET /api/folders/tree": () => json({ folders: [] }) });
+    renderTile(<FolderTile folder={FOTOS} />);
+    await userEvent.click(screen.getByRole("button", { name: "Ações para a pasta Fotos" }));
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Renomear" })).toBeInTheDocument();
   });
 });

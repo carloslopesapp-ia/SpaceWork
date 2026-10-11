@@ -8,7 +8,7 @@ import { Modal } from "./Modal";
 /**
  * Pré-visualização de uma imagem (`<img>`) ou de um PDF (`<iframe>`), servida por `/api/files/:id/preview`, que só aceita
  * estes tipos. Abre-se ao clicar. O mosaico só mostra miniaturas das imagens pequenas (`thumbnails.ts`): a API responde com
- * `no-store`, por isso cada miniatura é um pedido novo a cada listagem.
+ * `no-store`, por isso cada miniatura é um pedido novo a cada visita a uma pasta.
  */
 export function PreviewDialog({ file, onClose }: { file: FileItem; onClose: () => void }) {
   const [failed, setFailed] = useState(false);

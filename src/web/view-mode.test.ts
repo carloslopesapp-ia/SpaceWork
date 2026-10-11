@@ -21,10 +21,12 @@ describe("readViewMode", () => {
   });
 
   it("sem acesso ao armazenamento do browser (modo privado, dados bloqueados) vale a lista", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    localStorage.setItem(VIEW_MODE_KEY, "tiles"); // se a leitura funcionasse, seria o mosaico
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("bloqueado", "SecurityError");
     });
     expect(readViewMode()).toBe("list");
+    expect(spy).toHaveBeenCalledWith(VIEW_MODE_KEY);
   });
 });
 
@@ -41,13 +43,14 @@ describe("useViewMode", () => {
   });
 
   it("a escolha vale para a página mesmo que não se consiga guardar", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("cheio", "QuotaExceededError");
     });
     const { result } = renderHook(() => useViewMode());
 
     act(() => result.current[1]("tiles"));
 
+    expect(spy).toHaveBeenCalledWith(VIEW_MODE_KEY, "tiles");
     expect(result.current[0]).toBe("tiles");
   });
 });

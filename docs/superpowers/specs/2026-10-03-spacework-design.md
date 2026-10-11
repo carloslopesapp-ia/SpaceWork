@@ -183,7 +183,7 @@ Orçamento de subpedidos por execução, no pior caso: lixeira 13 (até 300 fich
 | Rota | Conteúdo |
 |---|---|
 | `/login`, `/registo` | Formulários de email e senha (o registo pede confirmação da senha). No registo por aprovação, depois de enviar, o ecrã diz que a conta aguarda a aprovação do administrador (sem entrar). |
-| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master; com o número de contas por aprovar, se houver), Sair, e barra de uso. A caixa de pesquisa fica na barra lateral, em todas as páginas (Enter leva a `/pesquisa?q=`, com os resultados e o caminho de cada um). Cabeçalho com caminho da pasta (*breadcrumb*), o seletor «Lista | Mosaico» (guardado no browser), "Nova pasta" e "Carregar". Lista de pastas e ficheiros (ou, no mosaico, quadrados com a imagem das fotos até 2 MB e o ícone e a extensão nos outros ficheiros) com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
+| `/` Meu espaço | Barra lateral: Meu espaço, Lixeira, Conta, Admin (só master; com o número de contas por aprovar, se houver), Sair, e barra de uso. A caixa de pesquisa fica na barra lateral, em todas as páginas (Enter leva a `/pesquisa?q=`, com os resultados e o caminho de cada um). Cabeçalho com caminho da pasta (*breadcrumb*), o seletor «Lista \| Mosaico» (guardado no browser), "Nova pasta" e "Carregar". Lista de pastas e ficheiros (ou, no mosaico, quadrados com a imagem das fotos até 2 MB e o ícone e a extensão nos outros ficheiros) com menu por item: pré-visualizar, descarregar, renomear, mover, partilhar, excluir. Upload por arrastar e largar e por seleção, com até 3 envios em paralelo e progresso por ficheiro (`XMLHttpRequest`). "Mover" abre um diálogo com a árvore de pastas. |
 | `/lixeira` | Ficheiros excluídos: Restaurar, Eliminar definitivamente, Esvaziar lixeira. |
 | `/conta` | Alterar senha. |
 | `/admin` | Tabela de utilizadores (email, usado/quota, estado, data de criação); editar quota, suspender/reativar, apagar. As contas por aprovar vêm primeiro, com o estado «Aguarda aprovação», e só têm **Aprovar** e **Rejeitar**. |
@@ -224,7 +224,7 @@ docs/superpowers/     specs e planos
 
 ## 12. Fora do âmbito da v1
 
-Recuperação de senha por email (e, por isso, o admin **não** consegue repor a senha de outro utilizador), confirmação de email, 2FA, criação de outros admins pela interface, uploads acima de 100 MB ou retomáveis, histórico de versões, partilha entre utilizadores, antivírus, paginação das listagens, vista em grelha, arrastar itens para mover, tema escuro, domínio próprio, deploy automático.
+Recuperação de senha por email (e, por isso, o admin **não** consegue repor a senha de outro utilizador), confirmação de email, 2FA, criação de outros admins pela interface, uploads acima de 100 MB ou retomáveis, histórico de versões, partilha entre utilizadores, antivírus, paginação das listagens, miniaturas geradas (o mosaico mostra a própria imagem das fotos pequenas), arrastar itens para mover, tema escuro, domínio próprio.
 
 ## 13. Factos verificados e pontos por confirmar
 

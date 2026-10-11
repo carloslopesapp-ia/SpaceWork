@@ -25,6 +25,7 @@ test("o mosaico: escolher a vista, ver a imagem, o ícone e a pasta, abrir a pr�
     await expect(page.getByRole("dialog", { name: "ponto.png" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Pré-visualizar ponto.png" })).toBeFocused();
   });
 
   await test.step("a escolha fica guardada neste browser", async () => {

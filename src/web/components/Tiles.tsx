@@ -11,8 +11,9 @@ import { PreviewDialog } from "./PreviewDialog";
 
 // Sem `overflow-hidden` no quadrado: o menu «⋮» abre-se por cima do que está à volta e seria cortado. O corte é só no rosto.
 const TILE = "relative flex flex-col rounded-xl border border-slate-200 bg-white hover:border-indigo-300";
-const FACE =
-  "flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300";
+const FACE = "flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-slate-50";
+// O anel de foco só nos rostos que são botões ou ligações (um rosto sem ação não recebe o foco).
+const FOCUS = "focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300";
 
 function Caption({ name, detail, actions }: { name: string; detail: string; actions: ReactNode }) {
   return (
@@ -32,7 +33,7 @@ function Caption({ name, detail, actions }: { name: string; detail: string; acti
 export function FolderTile({ folder }: { folder: FolderItem }) {
   return (
     <li className={TILE}>
-      <Link to={`/pasta/${folder.id}`} aria-label={`Abrir a pasta ${folder.name}`} className={FACE}>
+      <Link to={`/pasta/${folder.id}`} aria-label={`Abrir a pasta ${folder.name}`} className={`${FACE} ${FOCUS}`}>
         <FolderIcon large />
       </Link>
       <Caption name={folder.name} detail="Pasta" actions={<FolderActions folder={folder} />} />
@@ -41,7 +42,7 @@ export function FolderTile({ folder }: { folder: FolderItem }) {
 }
 
 /**
- * Um ficheiro no mosaico. As imagens pequenas mostram a própria imagem (carregada só quando o quadrado aparece no ecrã); os outros
+ * Um ficheiro no mosaico. As imagens pequenas mostram a própria imagem (carregada só quando o quadrado está perto do ecrã); os outros
  * ficheiros, o ícone e a extensão. Se o ficheiro se pré-visualiza, o quadrado é um botão que abre a pré-visualização.
  */
 export function FileTile({ file }: { file: FileItem }) {
@@ -53,25 +54,33 @@ export function FileTile({ file }: { file: FileItem }) {
 
   const face =
     showsThumbnail(file) && !thumbnailFailed ? (
-      // `alt` vazio: o nome do ficheiro já está por baixo.
+      // `alt` vazio: o nome do ficheiro já está por baixo. `draggable={false}`: arrastar a imagem para a página (a zona de largar) enviava uma
+      // cópia, porque o Chromium põe a imagem no que se arrasta. `decoding` e `fetchPriority`: as miniaturas não atrasam o resto da página.
       <img
         src={`/api/files/${encodeURIComponent(file.id)}/preview`}
         alt=""
         loading="lazy"
+        decoding="async"
+        fetchPriority="low"
+        draggable={false}
         onError={() => setThumbnailFailed(true)}
         className="h-full w-full object-cover"
       />
     ) : (
       <span className="flex flex-col items-center gap-1">
         <FileIcon large />
-        {extension && <span className="text-xs font-semibold text-slate-500">{extension}</span>}
+        {extension && (
+          <span aria-hidden="true" className="text-xs font-semibold text-slate-500">
+            {extension}
+          </span>
+        )}
       </span>
     );
 
   return (
     <li className={TILE}>
       {canPreview ? (
-        <button type="button" aria-label={`Pré-visualizar ${file.name}`} onClick={openPreview} className={FACE}>
+        <button type="button" aria-label={`Pré-visualizar ${file.name}`} onClick={openPreview} className={`${FACE} ${FOCUS}`}>
           {face}
         </button>
       ) : (

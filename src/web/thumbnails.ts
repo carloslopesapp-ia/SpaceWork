@@ -3,7 +3,7 @@ import type { FileItem } from "../shared/types";
 
 /**
  * Até este tamanho, a imagem de um ficheiro serve de miniatura no mosaico. A API responde com `no-store`, por isso cada miniatura é uma
- * descarga completa e nova a cada listagem: as imagens maiores mostram o ícone.
+ * descarga completa e nova a cada visita a uma pasta: as imagens maiores mostram o ícone.
  */
 export const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
