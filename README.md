@@ -86,15 +86,15 @@ Todas as rotas desta secção exigem sessão (cookie `sw_session`), exceto as du
 | `DELETE /api/shares/:id` | Revoga um link |
 | `GET /api/public/shares/:token` | Público: nome e tamanho do ficheiro partilhado |
 | `GET /api/public/shares/:token/download` | Público: descarrega o ficheiro partilhado (sempre como anexo) |
-| `GET /api/admin/users` | Só admin: as contas (`id`, `email`, `role`, `status`, `quotaBytes`, `usedBytes`, `createdAt`), da mais antiga para a mais recente, incluindo as que estão a ser removidas |
-| `PATCH /api/admin/users/:id` | Só admin: `{ quotaBytes?, status? }`. `quotaBytes` é um inteiro de bytes entre 0 e 2^50; `status` é `active` ou `suspended` (suspender termina as sessões da conta). Numa conta de admin só a quota muda (403 `admin_protected`); uma conta em remoção não se altera (409 `account_deleting`) |
-| `DELETE /api/admin/users/:id` | Só admin: marca a conta para remoção (`deleting`) e termina as sessões; a remoção é do cron. Responde 204, também se a conta já estava em remoção; uma conta de admin não se apaga (403 `admin_protected`) |
+| `GET /api/admin/users` | Só admin: as contas (`id`, `email`, `role`, `status`, `approved`, `quotaBytes`, `usedBytes`, `createdAt`): primeiro as que aguardam aprovação e depois as outras, da mais antiga para a mais recente, incluindo as que estão a ser removidas |
+| `PATCH /api/admin/users/:id` | Só admin: `{ quotaBytes?, status?, approved? }`. `quotaBytes` é um inteiro de bytes entre 0 e 2^50; `status` é `active` ou `suspended` (suspender termina as sessões da conta); `approved` só aceita `true` e aprova uma conta que aguarda aprovação (não se desfaz; 400 `invalid_approved`). Numa conta de admin só a quota muda (403 `admin_protected`); uma conta em remoção não se altera (409 `account_deleting`) |
+| `DELETE /api/admin/users/:id` | Só admin: marca a conta para remoção (`deleting`) e termina as sessões; a remoção é do cron. Uma conta que aguarda aprovação (rejeitar o pedido) apaga-se de imediato e liberta o email. Responde 204, também se a conta já estava em remoção; uma conta de admin não se apaga (403 `admin_protected`) |
 
 Um link só funciona se não foi revogado nem expirou, o ficheiro está fora da lixeira e a conta do dono está ativa; nos outros casos a resposta é sempre `404 share_not_found`, sem dizer porquê.
 
 As rotas `/api/admin/*` exigem também `role = admin` (senão 403 `forbidden`) e só gerem contas e quotas: **não há nenhuma rota para ver ou descarregar os ficheiros de outros utilizadores**, e o admin não consegue repor a senha de ninguém.
 
-O registo pode fechar-se com a variável `REGISTRATION_OPEN` (ver «Configuração»): fechado, `POST /api/auth/register` responde `403 registration_closed` e quem já tem conta continua a entrar. `GET /api/health` responde `200 { "ok": true }` ou, com a D1 em baixo, `503 { "ok": false }`.
+O registo tem três modos, escolhidos pela variável `REGISTRATION_OPEN` (ver «Configuração»): aberto (a conta entra logo), **por aprovação** (`POST /api/auth/register` cria a conta por aprovar e responde `202 { pending: true, message }`, sem sessão; o login dela dá `403 account_pending` com a senha certa, até um administrador a aprovar) e fechado (`403 registration_closed`). Em todos, quem já tem conta continua a entrar. `GET /api/auth/me` de um administrador traz `pendingApprovals`, o número de contas por aprovar. `GET /api/health` responde `200 { "ok": true }` ou, com a D1 em baixo, `503 { "ok": false }`.
 
 ## Interface
 
@@ -108,7 +108,7 @@ A **caixa de pesquisa** está na barra lateral de todas as páginas: Enter leva 
 
 **Sair** com envios em curso pede confirmação (sair cancela-os). Quando vários envios terminam, as listagens e a quota atualizam-se uma vez por meio segundo, e não uma vez por ficheiro.
 
-**Administração** (`/admin`, só para o master; a quem não é admin o endereço leva a «Meu espaço» e a ligação «Admin» nem aparece na barra lateral): a tabela das contas, com o email, o espaço usado e a quota, o estado (Ativa, Suspensa ou A remover) e a data de criação. O menu «⋮» de cada conta tem:
+**Administração** (`/admin`, só para o master; a quem não é admin o endereço leva a «Meu espaço» e a ligação «Admin» nem aparece na barra lateral): a tabela das contas, com o email, o espaço usado e a quota, o estado (Ativa, Suspensa, A remover ou **Aguarda aprovação**) e a data de criação. No registo por aprovação, as contas que aguardam aprovação vêm primeiro, com os botões «Aprovar» (a conta passa a entrar) e «Rejeitar…» (pede confirmação e apaga o pedido), e a ligação «Admin» da barra lateral mostra quantas são. O menu «⋮» de cada uma das outras contas tem:
 
 - «Alterar quota…», em GB (aceita vírgula ou ponto; de 0 a 1 048 576 GB). Baixar a quota abaixo do que a conta já usa não apaga nada: só impede novos envios.
 - «Suspender…» (pede confirmação): termina as sessões da conta e impede-a de entrar até ser reativada; os ficheiros ficam como estão e os links de partilha deixam de funcionar enquanto a conta estiver suspensa. «Reativar» não pede confirmação; a conta tem de entrar de novo.
@@ -147,7 +147,7 @@ As variáveis estão em `wrangler.jsonc` (`vars`) e são sempre texto:
 | `MAX_UPLOAD_BYTES` | `104857600` (100 MiB) | Tamanho máximo de um ficheiro |
 | `TRASH_RETENTION_DAYS` | `30` | Dias na lixeira antes de o cron eliminar o ficheiro |
 | `SESSION_TTL_DAYS` | `14` | Validade de uma sessão |
-| `REGISTRATION_OPEN` | `true` | Só `true` mantém o registo aberto; qualquer outro valor (por exemplo `false`) fecha-o |
+| `REGISTRATION_OPEN` | `true` (em `wrangler.jsonc`: `approval`) | `true`, ou sem a variável: registo aberto. `approval`: registo aberto, mas as contas novas ficam por aprovar até um administrador as aprovar no painel. Qualquer outro valor (por exemplo `false`) fecha o registo |
 
 **Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
 

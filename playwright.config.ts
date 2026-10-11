@@ -24,7 +24,8 @@ export default defineConfig({
     // `dist/` apagado e o ficheiro de redirecionamento ainda lá, migrar primeiro falha.
     command: [
       `rm -rf ${STATE_DIR}`,
-      "npm run build",
+      // `E2E_STATE` também na construção: o `vite.config.ts` põe então o registo aberto nessa construção (a que vai para produção não o tem).
+      `E2E_STATE=${STATE_DIR} npm run build`,
       `npx wrangler d1 migrations apply DB --local --persist-to ${STATE_DIR}`,
       `E2E_STATE=${STATE_DIR} npx vite preview --port ${PORT} --strictPort`,
     ].join(" && "),

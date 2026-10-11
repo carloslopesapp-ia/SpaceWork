@@ -12,7 +12,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 4 | [Admin e manutenção](2026-10-05-04-admin-e-manutencao.md) | API e painel de utilizadores (quotas, suspender e reativar, apagar contas) e o cron de manutenção por hora (lixeira expirada, envios pendentes, contas em remoção, sessões, falhas de login e partilhas velhas) | Concluído |
 | 5A | [Endurecimento e testes de ponta a ponta](2026-10-05-05a-endurecimento-e-testes-e2e.md) | Cabeçalhos de segurança (CSP), registos sem tokens, o cron com falha visível, `REGISTRATION_OPEN`, a passagem de acessibilidade dos diálogos e menus, e a suíte Playwright (fumo, envios, partilha, admin, teclado) contra a aplicação construída | Concluído |
 | 5B | Deploy | Recursos na Cloudflare (D1, R2), `wrangler deploy`, o master em produção, as medições na Cloudflare (CPU do PBKDF2 e do cron, subpedidos, limite do corpo, a execução falhada do cron no painel) | Por escrever |
-| 6 | [Registo por aprovação](2026-10-11-06-registo-por-aprovacao.md) | `REGISTRATION_OPEN=approval`: as contas novas ficam por aprovar até um administrador as ativar (API, ecrã de registo e de login, painel com «Aprovar» e «Rejeitar…», contador na barra lateral) e a produção passa a usar esse modo | Escrito, por executar |
+| 6 | [Registo por aprovação](2026-10-11-06-registo-por-aprovacao.md) | `REGISTRATION_OPEN=approval`: as contas novas ficam por aprovar até um administrador as ativar (API, ecrã de registo e de login, painel com «Aprovar» e «Rejeitar…», contador na barra lateral) e a produção passa a usar esse modo | Concluído |
 
 ## Factos verificados que os planos seguintes devem respeitar
 

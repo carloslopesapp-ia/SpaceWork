@@ -8,7 +8,8 @@ export default defineConfig({
       const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
       return {
         wrangler: { configPath: "./wrangler.jsonc" },
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        // A produção tem o registo por aprovação (`wrangler.jsonc`): os testes partem do registo aberto e escolhem o modo quando precisam.
+        miniflare: { bindings: { TEST_MIGRATIONS: migrations, REGISTRATION_OPEN: "true" } },
       };
     }),
   ],
