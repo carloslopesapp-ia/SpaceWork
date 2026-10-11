@@ -91,6 +91,19 @@ describe("AdminPage", () => {
   });
 });
 
+describe("AdminPage: atualizar", () => {
+  it("«Atualizar» refaz também a sessão, para o contador da barra lateral e a mensagem da página não discordarem", async () => {
+    const server = serve([ADMIN]);
+    renderApp("/admin");
+    await screen.findByRole("heading", { name: "Utilizadores" });
+    const before = server.callsTo("GET /api/auth/me").length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Atualizar" }));
+
+    await waitFor(() => expect(server.callsTo("GET /api/auth/me").length).toBeGreaterThan(before));
+  });
+});
+
 describe("AdminPage: ações", () => {
   it("suspender uma conta atualiza o estado na tabela e o menu passa a oferecer «Reativar»", async () => {
     let suspended = false;

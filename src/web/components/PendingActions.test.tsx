@@ -33,6 +33,25 @@ describe("PendingActions", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("«Rejeitar…» fica desativado enquanto «Aprovar» decorre (não se decide a mesma conta duas vezes)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    mockApi({
+      "PATCH /api/admin/users/:id": async () => {
+        await gate;
+        return json({ user: { ...BOB, approved: true } });
+      },
+    });
+    const user = setup();
+
+    await user.click(screen.getByRole("button", { name: APPROVE }));
+    expect(screen.getByRole("button", { name: APPROVE })).toBeDisabled();
+    expect(screen.getByRole("button", { name: REJECT })).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: REJECT })).toBeEnabled());
+  });
+
   it("um erro ao aprovar aparece por baixo dos botões", async () => {
     mockApi({ "PATCH /api/admin/users/:id": () => apiError(409, "account_deleting", "Esta conta está a ser removida.") });
     const user = setup();

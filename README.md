@@ -30,7 +30,7 @@ npm run seed:master -- --local        # --remote para a base de dados de produç
 unset MASTER_PASSWORD
 ```
 
-(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor). O `--remote` só funciona depois de a D1 de produção existir: o `database_id` do `wrangler.jsonc` é provisório (o deploy é o Plano 5B).
+(Em `bash`: `read -rsp "Senha do master: " MASTER_PASSWORD && export MASTER_PASSWORD`.) O script é idempotente: se o email já existir, não altera nada. Quota do master por defeito: 10 GiB (`MASTER_QUOTA_BYTES` para outro valor). O `--remote` só funciona depois de `wrangler login` (o `database_id` do `wrangler.jsonc` é o da D1 de produção).
 
 ## Comandos
 
@@ -151,9 +151,18 @@ As variáveis estão em `wrangler.jsonc` (`vars`) e são sempre texto:
 
 **Cabeçalhos e registos.** As páginas da aplicação levam `Content-Security-Policy` (em `public/_headers`: scripts, estilos, ligações e `<iframe>` só da própria origem, sem `unsafe-inline`), `X-Frame-Options` e `Referrer-Policy`; a API leva `Cache-Control: no-store`; as respostas de ficheiros levam a sua própria CSP (`default-src 'none'; sandbox`), exceto a pré-visualização de PDF, que não a pode ter (o leitor do browser deixa de funcionar). O `observability` está ligado **sem os registos de invocação**: o token de um link de partilha vai no caminho do URL e não deve ficar nos registos; o relatório do cron e os erros (`console.log` e `console.error`) continuam a ir para lá.
 
+## Deploy (Cloudflare)
+
+O repositório está ligado à Cloudflare (Workers Builds): cada push para `main` constrói (`npm run build`) e publica (`npx wrangler deploy`). Duas regras:
+
+1. **As migrações da D1 não correm sozinhas.** Uma migração nova tem de ser aplicada à D1 de produção (`npm run db:migrate:remote`) **antes** do push que traz o código que a usa; senão o Worker novo responde 500 em tudo o que toca na base. O `/api/health` não o mostra (só faz `SELECT 1`): depois do deploy, entre com o master e abra `/admin`.
+2. **Publique com `npm run deploy`** (reconstrói e publica), e não com um `npx wrangler deploy` solto: este publica o que houver em `dist/`, e depois dos testes de ponta a ponta isso era uma construção com o registo aberto. Os testes apagam a `dist/` ao acabar, por isso esse comando falha à vista. O Workers Builds constrói sempre de raiz.
+
+O registo da produção é **por aprovação** (`REGISTRATION_OPEN` = `approval`): quem se regista fica «Aguarda aprovação» até o administrador aprovar em `/admin`. O `npm run dev` também arranca assim: crie o master com `npm run seed:master -- --local` (numa base local que já existia, aplique primeiro `npm run db:migrate:local`) ou ponha `REGISTRATION_OPEN=true` num `.dev.vars`.
+
 ## Testes de ponta a ponta
 
-Correm num browser real contra a aplicação **construída** (`vite build` e `vite preview`: o Worker no workerd, com os assets estáticos e o `public/_headers` como em produção), com a D1 e o R2 simulados em `.e2e-state` (nunca a `.wrangler` de desenvolvimento), que começam vazios em cada execução. Usam a porta 4180.
+Correm num browser real contra a aplicação **construída** (`vite build` e `vite preview`: o Worker no workerd, com os assets estáticos e o `public/_headers` como em produção; o registo é que é aberto, porque cada teste cria a sua conta e entra logo: a produção usa o registo por aprovação), com a D1 e o R2 simulados em `.e2e-state` (nunca a `.wrangler` de desenvolvimento), que começam vazios em cada execução. Usam a porta 4180.
 
 ```bash
 npx playwright install chromium   # só da primeira vez (cerca de 100 MB)

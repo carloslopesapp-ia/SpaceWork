@@ -1,10 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Navigate } from "react-router";
 import { formatDate } from "../../shared/format";
 import type { AdminUser, UserStatus } from "../../shared/types";
 import { errorMessage } from "../api";
 import { useAdminUsers } from "../admin";
-import { useMe } from "../auth";
+import { ME_KEY, useMe } from "../auth";
 import { Button } from "../components/Button";
 import { Loading } from "../components/Loading";
 import { Message } from "../components/Message";
@@ -21,7 +22,7 @@ const STATUS_STYLE: Record<UserStatus, string> = {
 
 /** O estado que a linha mostra: uma conta por aprovar ainda não tem estado de utilização. */
 const PENDING_LABEL = "Aguarda aprovação";
-const PENDING_STYLE = "bg-indigo-50 text-indigo-700";
+const PENDING_STYLE = "bg-indigo-50 whitespace-nowrap text-indigo-700";
 
 function UserRow({ user, isSelf, actions }: { user: AdminUser; isSelf: boolean; actions?: ReactNode }) {
   return (
@@ -62,6 +63,7 @@ export default function AdminPage() {
   const me = useMe();
   const isAdmin = me.data?.role === "admin";
   const users = useAdminUsers({ enabled: isAdmin });
+  const queryClient = useQueryClient();
 
   if (me.data && !isAdmin) return <Navigate to="/" replace />;
   if (users.isPending) return <Loading />;
@@ -82,7 +84,15 @@ export default function AdminPage() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Utilizadores</h1>
-        <Button variant="secondary" disabled={users.isFetching} onClick={() => void users.refetch()}>
+        {/* Também refaz a sessão: o contador de contas por aprovar da barra lateral vem dela e não pode discordar da mensagem desta página. */}
+        <Button
+          variant="secondary"
+          disabled={users.isFetching}
+          onClick={() => {
+            void users.refetch();
+            void queryClient.invalidateQueries({ queryKey: ME_KEY });
+          }}
+        >
           Atualizar
         </Button>
       </div>

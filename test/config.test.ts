@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getConfig } from "../src/worker/config";
 
 describe("getConfig", () => {
-  it("lê os valores de wrangler.jsonc", () => {
+  it("lê os valores de wrangler.jsonc (menos o registo, que o `vitest.config.ts` põe aberto para os testes)", () => {
     expect(getConfig(env)).toEqual({
       defaultQuotaBytes: 1_073_741_824,
       maxUploadBytes: 104_857_600,

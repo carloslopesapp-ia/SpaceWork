@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router";
 import { isValidPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../shared/validation";
 import { useMe, useRegister } from "../auth";
@@ -14,6 +14,13 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const pendingRef = useRef<HTMLDivElement>(null);
+  const pending = register.data !== undefined && "pending" in register.data;
+
+  // No registo por aprovação o formulário desaparece, e o foco com ele: passa para a mensagem, para o leitor de ecrã a ler.
+  useEffect(() => {
+    if (pending) pendingRef.current?.focus();
+  }, [pending]);
 
   if (me.data) return <Navigate to="/" replace />;
 
@@ -47,7 +54,7 @@ export default function RegisterPage() {
           </>
         }
       >
-        <div className="space-y-4">
+        <div ref={pendingRef} tabIndex={-1} className="space-y-4 outline-none">
           <Message kind="success">{register.data.message}</Message>
           <p className="text-sm text-slate-600">Quando o administrador a aprovar, entre com o seu email e a sua senha.</p>
         </div>

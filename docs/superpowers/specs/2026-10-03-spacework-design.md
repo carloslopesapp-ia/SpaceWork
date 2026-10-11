@@ -84,8 +84,9 @@ IDs: `crypto.randomUUID()` (texto). Datas: inteiros (milissegundos Unix). As cha
 ### Registo e login
 
 - Email normalizado (trim + minúsculas, máx. 254 caracteres). Senha de 8 a 128 caracteres.
-- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
-- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta está suspensa (403). Contas `deleting` tratam-se como inexistentes.
+- O registo cria sempre `role = user`, `status = active`, `quota_bytes = DEFAULT_QUOTA_BYTES`, e (no registo aberto) inicia sessão. Um email já existente devolve 409 (a enumeração de emails pelo registo é um compromisso aceite na v1). Com `REGISTRATION_OPEN` definida e diferente de `true` e de `approval` (sem a variável o registo fica aberto) o registo está fechado: 403 `registration_closed`, antes de gastar o PBKDF2 da senha; o login não muda.
+- **Registo por aprovação** (`REGISTRATION_OPEN = approval`): a conta cria-se com `approved = 0` e **sem sessão**: o registo responde 202 `{ pending: true, message }` e a pessoa não entra nem carrega nada. Um administrador aprova (`approved = 1`: a conta passa a entrar) ou rejeita (apaga-a de vez: não tem ficheiros, e o email fica livre logo).
+- O login devolve sempre o erro genérico "email ou senha inválidos". Quando o email não existe, é feita na mesma uma verificação de hash "falsa" (contra uma constante pré-calculada, `DUMMY_PASSWORD_HASH`, com as iterações das senhas verdadeiras), para não haver diferença de tempo. Só depois de a senha estar correta se revela que a conta aguarda aprovação (403 `account_pending`) ou está suspensa (403 `account_suspended`), por esta ordem; com a senha errada o erro é o genérico. Contas `deleting` tratam-se como inexistentes.
 - Bloqueio: com 5 ou mais falhas do mesmo email nos últimos 15 minutos, o login é recusado (429). Uma entrada bem-sucedida apaga as falhas desse email. (Compromisso aceite: alguém pode bloquear o login de um email alheio durante 15 minutos.)
 
 ### Senhas
@@ -95,7 +96,7 @@ PBKDF2-SHA256 via WebCrypto, salt aleatório de 16 bytes, 100 000 iterações (o
 ### Sessões
 
 - Token de 32 bytes aleatórios em cookie `sw_session`: `HttpOnly; SameSite=Lax; Path=/; Max-Age=<SESSION_TTL>`, com `Secure` quando o pedido é HTTPS (em desenvolvimento local em HTTP não se põe `Secure`).
-- A D1 guarda só o hash do token. O logout apaga a sessão. Suspender ou apagar um utilizador e alterar a senha apagam as sessões em causa.
+- A D1 guarda só o hash do token. A autenticação por sessão exige `status = 'active'` e `approved = 1`. O logout apaga a sessão. Suspender ou apagar um utilizador e alterar a senha apagam as sessões em causa.
 - Pedidos POST/PUT/PATCH/DELETE: o cabeçalho `Origin` tem de existir e coincidir com a origem do pedido, caso contrário 403 (proteção CSRF, em conjunto com `SameSite=Lax`).
 
 ### Isolamento de dados

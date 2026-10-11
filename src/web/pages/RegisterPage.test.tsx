@@ -43,6 +43,8 @@ describe("RegisterPage", () => {
     await fillAndSubmit(userEvent.setup());
 
     expect(await screen.findByRole("status")).toHaveTextContent(PENDING);
+    expect(screen.getByText(PENDING).parentElement).toHaveFocus(); // o foco passa para a mensagem (o formulário, onde estava, desapareceu)
+    expect(screen.getByText("Quando o administrador a aprovar, entre com o seu email e a sua senha.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Principal" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/login");

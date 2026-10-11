@@ -29,11 +29,9 @@ export function PendingActions({ user }: { user: AdminUser }) {
         <Button
           variant="secondary"
           className="px-3 py-1.5"
+          disabled={update.isPending} // não se rejeita uma conta enquanto «Aprovar» decorre
           aria-label={`Rejeitar o pedido de ${user.email}`}
-          onClick={() => {
-            update.reset(); // um erro de «Aprovar» não pode aparecer num diálogo que ainda ninguém confirmou
-            open("reject");
-          }}
+          onClick={() => open("reject")}
         >
           Rejeitar…
         </Button>

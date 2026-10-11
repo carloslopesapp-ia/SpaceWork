@@ -12,6 +12,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   forbidOnly: Boolean(process.env.CI),
+  globalTeardown: "./e2e/teardown.ts",
   reporter: [["list"]],
   use: {
     baseURL: ORIGIN,

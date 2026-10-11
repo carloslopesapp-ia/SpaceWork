@@ -58,6 +58,13 @@ describe("a casca da aplicação", () => {
   });
 });
 
+describe("a configuração do registo", () => {
+  it("a produção usa o registo por aprovação (as suítes põem o registo aberto na sua própria configuração)", () => {
+    const config = JSON.parse(wrangler) as { vars?: { REGISTRATION_OPEN?: string } };
+    expect(config.vars?.REGISTRATION_OPEN).toBe("approval");
+  });
+});
+
 describe("a configuração de registos do Worker", () => {
   it("o `observability` está ligado, mas sem os registos de invocação (levariam o token de cada link de partilha, que vai no caminho do URL)", () => {
     const config = JSON.parse(wrangler) as { observability?: { enabled?: boolean; logs?: { invocation_logs?: boolean } } };
