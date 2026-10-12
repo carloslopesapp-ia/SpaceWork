@@ -7,7 +7,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 test("a pré-visualização passa de uma imagem à seguinte com as setas e com o teclado, e ao fechar o foco volta à que estava à vista", async ({ page }) => {
   await signUp(page);
   await upload(page, "a.png", PNG, "image/png");
-  await upload(page, "nota.txt", "olá"); // o texto não se pré-visualiza: as setas saltam-no
+  await upload(page, "ab.txt", "olá"); // o texto não se pré-visualiza: a lista é por ordem alfabética, fica entre a.png e b.png e as setas saltam-no
   await upload(page, "b.png", PNG, "image/png");
   await upload(page, "c.png", PNG, "image/png");
 
@@ -26,6 +26,7 @@ test("a pré-visualização passa de uma imagem à seguinte com as setas e com o
     const dialog = page.getByRole("dialog", { name: "c.png" });
     await expect(dialog.getByText("3 de 3")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Ficheiro seguinte" })).toHaveAttribute("aria-disabled", "true");
+    await expect(dialog.getByRole("button", { name: "Ficheiro seguinte" })).toBeFocused(); // desativada, mas com o foco: não se perde
     const image = dialog.getByRole("img", { name: "c.png" });
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(1);
   });

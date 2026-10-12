@@ -59,7 +59,7 @@ describe("FileTile", () => {
   });
 
   it("um ficheiro que não se pré-visualiza mostra o ícone e a extensão, e não é um botão", () => {
-    const { container } = renderTile(<FileTile file={file("nota.txt", 10)} />);
+    const { container } = renderTile(<FileTile file={file("nota.txt", 10)} onPreview={() => undefined} />);
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("TXT")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Pré-visualizar/ })).not.toBeInTheDocument();

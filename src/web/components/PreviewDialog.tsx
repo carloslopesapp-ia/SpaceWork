@@ -55,9 +55,9 @@ function Arrow({ direction, disabled, onClick }: { direction: "previous" | "next
       aria-label={previous ? "Ficheiro anterior" : "Ficheiro seguinte"}
       aria-disabled={disabled}
       onClick={disabled ? undefined : onClick}
-      className={`absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white/90 text-slate-700 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
+      className={`absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border bg-white/90 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
         previous ? "left-1" : "right-1"
-      } ${disabled ? "cursor-not-allowed opacity-40" : "hover:bg-white"}`}
+      } ${disabled ? "cursor-not-allowed border-slate-200 text-slate-300" : "border-slate-300 text-slate-700 hover:bg-white"}`}
     >
       <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={previous ? "M12 4l-6 6 6 6" : "M8 4l6 6-6 6"} />
@@ -73,6 +73,10 @@ function Arrow({ direction, disabled, onClick }: { direction: "previous" | "next
  *
  * Com `navigation`, tem setas para o ficheiro anterior e o seguinte (e as teclas ← e →) e diz onde está («2 de 5»). As teclas ouvem-se no
  * documento e por isso calam-se quando o foco está dentro do leitor de PDF, que usa as setas para mudar de página.
+ *
+ * O foco não se move ao mudar de ficheiro, por isso o contador é o único aviso a quem usa um leitor de ecrã: `aria-atomic` para ler «2 de 5»
+ * inteiro (e não só o algarismo que mudou) e o nome do ficheiro, escondido da vista, para dizer qual é. A seta desativada esbate-se sem
+ * `opacity` (que apagava também o anel de foco, e o foco fica ali quando se chega ao fim).
  */
 export function PreviewDialog({ file, onClose, navigation }: { file: FileItem; onClose: () => void; navigation?: PreviewNavigation }) {
   const id = encodeURIComponent(file.id);
@@ -104,8 +108,9 @@ export function PreviewDialog({ file, onClose, navigation }: { file: FileItem; o
         </div>
       </div>
       {navigation && (
-        <p aria-live="polite" className="mt-3 text-center text-sm text-slate-500">
-          {navigation.index + 1} de {navigation.total}
+        <p aria-live="polite" aria-atomic="true" className="mt-3 text-center text-sm text-slate-500">
+          {`${navigation.index + 1} de ${navigation.total}`}
+          <span className="sr-only">: {file.name}</span>
         </p>
       )}
       <div className="mt-4 flex justify-end gap-2">

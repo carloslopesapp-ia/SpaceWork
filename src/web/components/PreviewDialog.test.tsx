@@ -53,7 +53,10 @@ describe("PreviewDialog: setas para o ficheiro anterior e o seguinte", () => {
     const nav = navigation(1, 3);
     render(<PreviewDialog file={file("b.png")} onClose={() => undefined} navigation={nav} />);
     const dialog = screen.getByRole("dialog", { name: "b.png" });
-    expect(within(dialog).getByText("2 de 3")).toBeInTheDocument();
+    const counter = within(dialog).getByText("2 de 3");
+    expect(counter).toHaveAttribute("aria-live", "polite");
+    expect(counter).toHaveAttribute("aria-atomic", "true"); // o leitor de ecrã lê «2 de 3» inteiro, e não só o algarismo que mudou
+    expect(counter).toHaveTextContent("2 de 3: b.png"); // e diz que ficheiro é (o foco não se move ao mudar)
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Ficheiro seguinte" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Ficheiro anterior" }));
@@ -123,5 +126,17 @@ describe("PreviewDialog: setas para o ficheiro anterior e o seguinte", () => {
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "b.png" })).toHaveAttribute("src", "/api/files/b2/preview");
+  });
+
+  it("o Esc fecha o diálogo mesmo com o foco numa seta desativada", async () => {
+    const onClose = vi.fn();
+    render(<PreviewDialog file={file("c.png")} onClose={onClose} navigation={navigation(2, 3)} />);
+    const forward = screen.getByRole("button", { name: "Ficheiro seguinte" });
+    forward.focus();
+    expect(forward).toHaveFocus(); // com `disabled` em vez de `aria-disabled` isto já falhava
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
