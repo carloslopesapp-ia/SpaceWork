@@ -14,6 +14,7 @@ A [especificação](../specs/2026-10-03-spacework-design.md) é implementada em 
 | 5B | [Deploy](2026-10-11-05b-deploy.md) | Recursos na Cloudflare (D1, R2), `wrangler deploy`, o master em produção e o deploy automático por Git; o guia do que se fez e do que correu mal. Feito à mão com o dono (sem replay) | Concluído; faltam as medições que precisam da conta (o cron, o CPU) |
 | 6 | [Registo por aprovação](2026-10-11-06-registo-por-aprovacao.md) | `REGISTRATION_OPEN=approval`: as contas novas ficam por aprovar até um administrador as ativar (API, ecrã de registo e de login, painel com «Aprovar» e «Rejeitar…», contador na barra lateral) e a produção passa a usar esse modo | Concluído |
 | 7 | [Mosaico em «Meu espaço»](2026-10-11-07-mosaico.md) | O seletor «Lista \| Mosaico» (guardado no browser) e o mosaico de quadrados, com a imagem das fotos até 2 MB e o ícone e a extensão nos outros ficheiros | Concluído |
+| 8 | [Navegar na pré-visualização](2026-10-12-08-navegacao-previsualizacao.md) | Setas (e ← →) na pré-visualização para o ficheiro anterior e o seguinte da pasta ou dos resultados da pesquisa, com o contador «2 de 5» | Escrito, por executar |
 
 ## Factos verificados que os planos seguintes devem respeitar
 
