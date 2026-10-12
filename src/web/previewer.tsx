@@ -7,7 +7,8 @@ import { PreviewDialog } from "./components/PreviewDialog";
  * A pré-visualização de uma lista de ficheiros (uma pasta, os resultados de uma pesquisa). `open(file)` abre o diálogo nesse ficheiro e as
  * setas passam ao anterior e ao seguinte **dos que se pré-visualizam**, pela ordem da lista. O diálogo é da página e não de cada linha
  * ou quadrado, para conhecer a lista toda. O ficheiro aberto guarda-se pelo id: se a lista muda à volta dele o diálogo continua nele e se
- * ele sai da lista (foi excluído, ou renomeado para um tipo sem pré-visualização) o diálogo fecha-se.
+ * ele sai da lista (foi excluído, ou renomeado para um tipo sem pré-visualização) o diálogo fecha-se e esquece-o: se o ficheiro voltar à
+ * lista, o diálogo não reabre sozinho.
  *
  * Ao fechar, o foco volta ao botão que abriu o diálogo (o menu «⋮», por exemplo); mas se se passou a outro ficheiro, vai para o botão do ficheiro
  * que está à vista (o que tem `data-preview-id`: o nome de uma linha, o rosto de um quadrado), porque o que abriu já não tem a ver com o que se vê.
@@ -24,6 +25,7 @@ export function usePreviewer(files: FileItem[]): { open: (file: FileItem) => voi
       shown.current = currentId;
       return;
     }
+    if (currentId !== null) setCurrentId(null); // o ficheiro saiu da lista: esquecê-lo, senão o diálogo reabria se voltasse
     const id = shown.current;
     shown.current = null;
     if (id === null || id === opened.current) return; // o Modal já devolveu o foco a quem o abriu

@@ -75,6 +75,9 @@ describe("usePreviewer", () => {
     rerender(<List files={[A, C]} />);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    rerender(<List files={[A, B, C]} />); // o ficheiro volta (restaurado, ou renomeado de volta): o diálogo não reabre sozinho
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("se a lista muda à volta do ficheiro aberto, o diálogo continua nele (pelo id) e conta de novo", async () => {
