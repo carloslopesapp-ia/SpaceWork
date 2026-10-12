@@ -1,9 +1,13 @@
 import { useSearchParams } from "react-router";
+import type { FileItem } from "../../shared/types";
 import { errorMessage } from "../api";
 import { Button } from "../components/Button";
 import { FileRow, FolderRow } from "../components/ItemRows";
 import { Message } from "../components/Message";
+import { usePreviewer } from "../previewer";
 import { describeSearch, useSearch } from "../search";
+
+const NO_FILES: FileItem[] = [];
 
 /** O servidor devolve no máximo 50 resultados. */
 const MAX_RESULTS = 50;
@@ -15,6 +19,8 @@ export default function SearchPage() {
   const { term, problem } = describeSearch(raw);
   const search = useSearch(raw);
   const results = problem === null ? search.data : undefined;
+  // As setas da pré-visualização passam pelos ficheiros dos resultados (as pastas não contam), pela ordem em que aparecem.
+  const preview = usePreviewer(results?.flatMap((result) => (result.kind === "file" ? [result.file] : [])) ?? NO_FILES);
 
   // Uma só linha de estado, sempre montada e com `role="status"`: o foco fica na caixa de pesquisa e os leitores de ecrã só anunciam
   // o que muda dentro de uma região viva (uma linha nova a cada estado não seria anunciada).
@@ -49,11 +55,12 @@ export default function SearchPage() {
             result.kind === "folder" ? (
               <FolderRow key={`folder-${result.folder.id}`} folder={result.folder} path={result.path} />
             ) : (
-              <FileRow key={`file-${result.file.id}`} file={result.file} path={result.path} />
+              <FileRow key={`file-${result.file.id}`} file={result.file} path={result.path} onPreview={preview.open} />
             ),
           )}
         </ul>
       )}
+      {preview.dialog}
     </div>
   );
 }

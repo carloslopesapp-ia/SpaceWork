@@ -7,7 +7,6 @@ import { extensionLabel, showsThumbnail } from "../thumbnails";
 import { FileActions } from "./FileActions";
 import { FolderActions } from "./FolderActions";
 import { FileIcon, FolderIcon } from "./icons";
-import { PreviewDialog } from "./PreviewDialog";
 
 // Sem `overflow-hidden` no quadrado: o menu «⋮» abre-se por cima do que está à volta e seria cortado. O corte é só no rosto.
 const TILE = "relative flex flex-col rounded-xl border border-slate-200 bg-white hover:border-indigo-300";
@@ -43,13 +42,13 @@ export function FolderTile({ folder }: { folder: FolderItem }) {
 
 /**
  * Um ficheiro no mosaico. As imagens pequenas mostram a própria imagem (carregada só quando o quadrado está perto do ecrã); os outros
- * ficheiros, o ícone e a extensão. Se o ficheiro se pré-visualiza, o quadrado é um botão que abre a pré-visualização.
+ * ficheiros, o ícone e a extensão. Se o ficheiro se pré-visualiza (e quem usa o quadrado trata disso, `onPreview`), o quadrado é um botão
+ * que a pede.
  */
-export function FileTile({ file }: { file: FileItem }) {
-  const [previewing, setPreviewing] = useState(false);
+export function FileTile({ file, onPreview }: { file: FileItem; onPreview?: (file: FileItem) => void }) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  const canPreview = previewContentType(file.name) !== null;
-  const openPreview = () => setPreviewing(true);
+  const canPreview = onPreview !== undefined && previewContentType(file.name) !== null;
+  const openPreview = () => onPreview?.(file);
   const extension = extensionLabel(file.name);
 
   const face =
@@ -80,7 +79,13 @@ export function FileTile({ file }: { file: FileItem }) {
   return (
     <li className={TILE}>
       {canPreview ? (
-        <button type="button" aria-label={`Pré-visualizar ${file.name}`} onClick={openPreview} className={`${FACE} ${FOCUS}`}>
+        <button
+          type="button"
+          aria-label={`Pré-visualizar ${file.name}`}
+          data-preview-id={file.id}
+          onClick={openPreview}
+          className={`${FACE} ${FOCUS}`}
+        >
           {face}
         </button>
       ) : (
@@ -89,12 +94,7 @@ export function FileTile({ file }: { file: FileItem }) {
       <Caption
         name={file.name}
         detail={formatBytes(file.size)}
-        actions={
-          <>
-            <FileActions file={file} onPreview={canPreview ? openPreview : undefined} />
-            {previewing && <PreviewDialog file={file} onClose={() => setPreviewing(false)} />}
-          </>
-        }
+        actions={<FileActions file={file} onPreview={canPreview ? openPreview : undefined} />}
       />
     </li>
   );

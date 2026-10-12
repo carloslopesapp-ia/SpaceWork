@@ -9,11 +9,15 @@ import { Message } from "../components/Message";
 import { NameDialog } from "../components/NameDialog";
 import { FileTile, FolderTile } from "../components/Tiles";
 import { ViewToggle } from "../components/ViewToggle";
+import type { FileItem } from "../../shared/types";
 import { filesFromDrop } from "../dropped-files";
+import { usePreviewer } from "../previewer";
 import { useContents, useCreateFolder } from "../space";
 import { ROOT_LABEL } from "../tree";
 import { useUploadActions } from "../uploads-context";
 import { useViewMode } from "../view-mode";
+
+const NO_FILES: FileItem[] = [];
 
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 /** Um diálogo aberto é do que está a decorrer: enquanto houver um, o que se larga não é para a zona de largar (o fundo do diálogo cobre o ecrã todo, por isso não basta olhar ao alvo do evento). */
@@ -29,6 +33,7 @@ export default function FolderPage() {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useViewMode();
+  const preview = usePreviewer(contents.data?.files ?? NO_FILES);
   const fileInput = useRef<HTMLInputElement>(null);
   // `dragenter`/`dragleave` disparam também ao passar por cima dos filhos: conta-se a profundidade.
   const dragDepth = useRef(0);
@@ -141,7 +146,7 @@ export default function FolderPage() {
             <FolderTile key={item.id} folder={item} />
           ))}
           {files.map((item) => (
-            <FileTile key={item.id} file={item} />
+            <FileTile key={item.id} file={item} onPreview={preview.open} />
           ))}
         </ul>
       ) : (
@@ -150,10 +155,12 @@ export default function FolderPage() {
             <FolderRow key={item.id} folder={item} />
           ))}
           {files.map((item) => (
-            <FileRow key={item.id} file={item} />
+            <FileRow key={item.id} file={item} onPreview={preview.open} />
           ))}
         </ul>
       )}
+
+      {preview.dialog}
 
       {creating && (
         <NameDialog

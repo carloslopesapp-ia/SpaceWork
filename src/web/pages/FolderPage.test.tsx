@@ -495,3 +495,77 @@ describe("FolderPage: mosaico", () => {
     expect(await screen.findByText(/Esta pasta está vazia/)).toBeInTheDocument();
   });
 });
+
+describe("FolderPage: navegar na pré-visualização", () => {
+  beforeEach(() => localStorage.clear());
+
+  const entry = { folderId: "f1", size: 1000, mime: "image/png", createdAt: CREATED };
+  const GALLERY: FolderContents = {
+    ...FOTOS,
+    files: [
+      { ...entry, id: "i1", name: "a.png" },
+      { ...entry, id: "t1", name: "notas.txt" },
+      { ...entry, id: "i2", name: "b.png" },
+      { ...entry, id: "i3", name: "c.png" },
+    ],
+  };
+  const serveGallery = () =>
+    mockApi({ ...SESSION, "GET /api/folders/:id/contents": () => json(GALLERY), "GET /api/folders/tree": () => json({ folders: [] }) });
+
+  it("na lista: as setas e as teclas passam de uma imagem à seguinte, e ao fechar o foco volta ao nome da que estava à vista", async () => {
+    serveGallery();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "b.png" }));
+    expect(screen.getByRole("dialog", { name: "b.png" })).toBeInTheDocument();
+    expect(screen.getByText("2 de 3")).toBeInTheDocument(); // notas.txt não conta
+
+    await user.click(screen.getByRole("button", { name: "Ficheiro seguinte" }));
+    expect(screen.getByRole("dialog", { name: "c.png" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "c.png" })).toHaveAttribute("src", "/api/files/i3/preview");
+    await user.keyboard("{ArrowLeft}{ArrowLeft}");
+    expect(screen.getByRole("dialog", { name: "a.png" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "a.png" })).toHaveFocus();
+  });
+
+  it("no mosaico: o quadrado abre a pré-visualização e as setas passam à seguinte", async () => {
+    localStorage.setItem("spacework:view-mode", "tiles");
+    serveGallery();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Pré-visualizar a.png" }));
+    expect(screen.getByText("1 de 3")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ficheiro seguinte" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("button", { name: "Pré-visualizar b.png" })).toHaveFocus();
+  });
+
+  it("«Pré-visualizar» no menu «⋮» também deixa navegar", async () => {
+    serveGallery();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Ações para o ficheiro b.png" }));
+    await user.click(screen.getByRole("menuitem", { name: "Pré-visualizar" }));
+
+    await user.click(screen.getByRole("button", { name: "Ficheiro anterior" }));
+
+    expect(screen.getByRole("dialog", { name: "a.png" })).toBeInTheDocument();
+  });
+
+  it("aberta pelo menu «⋮» e fechada sem navegar, o foco volta ao «⋮»", async () => {
+    serveGallery();
+    const user = userEvent.setup();
+    renderApp("/pasta/f1");
+    await user.click(await screen.findByRole("button", { name: "Ações para o ficheiro b.png" }));
+    await user.click(screen.getByRole("menuitem", { name: "Pré-visualizar" }));
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("button", { name: "Ações para o ficheiro b.png" })).toHaveFocus();
+  });
+});

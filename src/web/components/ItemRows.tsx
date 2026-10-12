@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { formatBytes, formatDate } from "../../shared/format";
 import { previewContentType } from "../../shared/preview";
@@ -7,7 +7,6 @@ import { FileActions } from "./FileActions";
 import { FolderActions } from "./FolderActions";
 import { FileIcon, FolderIcon } from "./icons";
 import { Location } from "./Location";
-import { PreviewDialog } from "./PreviewDialog";
 
 interface ItemRowProps {
   icon: ReactNode;
@@ -53,17 +52,17 @@ export function FolderRow({ folder, path }: { folder: FolderItem; path?: Breadcr
   );
 }
 
-export function FileRow({ file, path }: { file: FileItem; path?: BreadcrumbItem[] }) {
-  const [previewing, setPreviewing] = useState(false);
-  const canPreview = previewContentType(file.name) !== null;
-  const openPreview = () => setPreviewing(true);
+/** `onPreview`: quem trata da pré-visualização (a página, que conhece a lista toda e deixa passar de um ficheiro ao seguinte); sem ele a linha não a oferece. */
+export function FileRow({ file, path, onPreview }: { file: FileItem; path?: BreadcrumbItem[]; onPreview?: (file: FileItem) => void }) {
+  const canPreview = onPreview !== undefined && previewContentType(file.name) !== null;
+  const openPreview = () => onPreview?.(file);
   return (
     <ItemRow
       icon={<FileIcon />}
       subtitle={path && <Location path={path} />}
       name={
         canPreview ? (
-          <button type="button" title={file.name} onClick={openPreview} className="block w-full truncate text-left hover:underline">
+          <button type="button" title={file.name} data-preview-id={file.id} onClick={openPreview} className="block w-full truncate text-left hover:underline">
             {file.name}
           </button>
         ) : (
@@ -75,10 +74,7 @@ export function FileRow({ file, path }: { file: FileItem; path?: BreadcrumbItem[
       size={formatBytes(file.size)}
       date={formatDate(file.createdAt)}
       actions={
-        <>
-          <FileActions file={file} onPreview={canPreview ? openPreview : undefined} />
-          {previewing && <PreviewDialog file={file} onClose={() => setPreviewing(false)} />}
-        </>
+        <FileActions file={file} onPreview={canPreview ? openPreview : undefined} />
       }
     />
   );

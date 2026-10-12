@@ -185,3 +185,25 @@ describe("pesquisa", () => {
     expect(screen.getByRole("status")).toBe(status); // o mesmo elemento: os leitores de ecrã anunciam a mudança
   });
 });
+
+describe("pesquisa: pré-visualização com setas", () => {
+  const IMAGE = (id: string, name: string): SearchResult => ({
+    kind: "file",
+    path: [{ id: "f1", name: "Fotos" }],
+    file: { id, name, folderId: "f1", size: 1536, mime: "image/png", createdAt: 0 },
+  });
+
+  it("as setas passam de um resultado que se pré-visualiza ao seguinte, e saltam as pastas e o que não se pré-visualiza", async () => {
+    serve([IMAGE("p1", "praia.png"), FOLDER_IN_ROOT, NOTES_DEEP, IMAGE("p2", "praia2.png")]);
+    const user = userEvent.setup();
+    renderApp("/pesquisa?q=praia");
+    await user.click(await screen.findByRole("button", { name: "praia.png" }));
+    expect(screen.getByText("1 de 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ficheiro seguinte" }));
+
+    expect(screen.getByRole("dialog", { name: "praia2.png" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "praia2.png" })).toHaveFocus();
+  });
+});

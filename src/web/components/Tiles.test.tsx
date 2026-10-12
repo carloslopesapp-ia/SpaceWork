@@ -1,7 +1,7 @@
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FileItem, FolderItem } from "../../shared/types";
 import { THUMBNAIL_MAX_BYTES } from "../thumbnails";
 import { json, mockApi } from "../test/mock-api";
@@ -24,7 +24,7 @@ function renderTile(tile: React.ReactElement) {
 
 describe("FileTile", () => {
   it("uma imagem pequena mostra a própria imagem, carregada só quando aparece no ecrã", () => {
-    const { container } = renderTile(<FileTile file={file("foto.png", 1000)} />);
+    const { container } = renderTile(<FileTile file={file("foto.png", 1000)} onPreview={() => undefined} />);
     const image = container.querySelector("img")!;
     expect(image).toHaveAttribute("src", "/api/files/a1/preview");
     expect(image).toHaveAttribute("loading", "lazy");
@@ -37,14 +37,14 @@ describe("FileTile", () => {
   });
 
   it("uma imagem acima do limite mostra o ícone e a extensão, sem pedir a imagem", () => {
-    const { container } = renderTile(<FileTile file={file("foto.png", THUMBNAIL_MAX_BYTES + 1)} />);
+    const { container } = renderTile(<FileTile file={file("foto.png", THUMBNAIL_MAX_BYTES + 1)} onPreview={() => undefined} />);
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("PNG")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pré-visualizar foto.png" })).toBeInTheDocument(); // continua a abrir a pré-visualização
   });
 
   it("se a imagem não carregar, passa ao ícone", () => {
-    const { container } = renderTile(<FileTile file={file("foto.png", 1000)} />);
+    const { container } = renderTile(<FileTile file={file("foto.png", 1000)} onPreview={() => undefined} />);
     fireEvent.error(container.querySelector("img")!);
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("PNG")).toBeInTheDocument();
@@ -65,18 +65,30 @@ describe("FileTile", () => {
     expect(screen.queryByRole("button", { name: /Pré-visualizar/ })).not.toBeInTheDocument();
   });
 
-  it("um PDF mostra o ícone e abre a pré-visualização ao clicar no quadrado", async () => {
-    renderTile(<FileTile file={file("relatório.pdf", 1536)} />);
+  it("um PDF mostra o ícone e pede a pré-visualização (`onPreview`, com o ficheiro) ao clicar no quadrado", async () => {
+    const onPreview = vi.fn();
+    const pdf = file("relatório.pdf", 1536);
+    renderTile(<FileTile file={pdf} onPreview={onPreview} />);
     expect(screen.getByText("PDF")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Pré-visualizar relatório.pdf" }));
 
-    expect(await screen.findByRole("dialog", { name: "relatório.pdf" })).toBeInTheDocument();
+    expect(onPreview).toHaveBeenCalledExactlyOnceWith(pdf);
+  });
+
+  it("sem `onPreview` (quem usa o quadrado não trata da pré-visualização) o quadrado não é um botão", () => {
+    renderTile(<FileTile file={file("foto.png", 1000)} />);
+    expect(screen.queryByRole("button", { name: /Pré-visualizar/ })).not.toBeInTheDocument();
+  });
+
+  it("o botão do quadrado leva o id do ficheiro (`data-preview-id`), para o foco voltar a ele", () => {
+    renderTile(<FileTile file={file("foto.png", 1000)} onPreview={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Pré-visualizar foto.png" })).toHaveAttribute("data-preview-id", "a1");
   });
 
   it("tem o menu «⋮» do ficheiro, com a ação de pré-visualizar quando há pré-visualização", async () => {
     mockApi({ "GET /api/folders/tree": () => json({ folders: [] }) });
-    renderTile(<FileTile file={file("relatório.pdf", 1536)} />);
+    renderTile(<FileTile file={file("relatório.pdf", 1536)} onPreview={() => undefined} />);
     await userEvent.click(screen.getByRole("button", { name: "Ações para o ficheiro relatório.pdf" }));
     expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Pré-visualizar" })).toBeInTheDocument();
   });
