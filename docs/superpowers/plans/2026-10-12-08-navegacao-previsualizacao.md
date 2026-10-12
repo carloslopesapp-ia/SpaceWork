@@ -108,7 +108,10 @@ describe("PreviewDialog: setas para o ficheiro anterior e o seguinte", () => {
     const nav = navigation(1, 3);
     render(<PreviewDialog file={file("b.png")} onClose={() => undefined} navigation={nav} />);
     const dialog = screen.getByRole("dialog", { name: "b.png" });
-    expect(within(dialog).getByText("2 de 3")).toBeInTheDocument();
+    const counter = within(dialog).getByText("2 de 3");
+    expect(counter).toHaveAttribute("aria-live", "polite");
+    expect(counter).toHaveAttribute("aria-atomic", "true"); // o leitor de ecrã lê «2 de 3» inteiro, e não só o algarismo que mudou
+    expect(counter).toHaveTextContent("2 de 3: b.png"); // e diz que ficheiro é (o foco não se move ao mudar)
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Ficheiro seguinte" }));
     await userEvent.click(within(dialog).getByRole("button", { name: "Ficheiro anterior" }));
@@ -179,11 +182,23 @@ describe("PreviewDialog: setas para o ficheiro anterior e o seguinte", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "b.png" })).toHaveAttribute("src", "/api/files/b2/preview");
   });
+
+  it("o Esc fecha o diálogo mesmo com o foco numa seta desativada", async () => {
+    const onClose = vi.fn();
+    render(<PreviewDialog file={file("c.png")} onClose={onClose} navigation={navigation(2, 3)} />);
+    const forward = screen.getByRole("button", { name: "Ficheiro seguinte" });
+    forward.focus();
+    expect(forward).toHaveFocus(); // com `disabled` em vez de `aria-disabled` isto já falhava
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts src/web/components/PreviewDialog.test.tsx`
-Expected: FAIL (Test Files  1 failed (1); Tests  5 failed | 7 passed (12)). Falham os testes das setas, das teclas e do aviso que não passa à seguinte; os de sempre passam.
+Expected: FAIL (Test Files  1 failed (1); Tests  6 failed | 7 passed (13)). Falham os testes das setas, das teclas e do aviso que não passa à seguinte; os de sempre passam.
 
 - [ ] **Step 2: A implementação**
 
@@ -293,9 +308,9 @@ function Arrow({ direction, disabled, onClick }: { direction: "previous" | "next
       aria-label={previous ? "Ficheiro anterior" : "Ficheiro seguinte"}
       aria-disabled={disabled}
       onClick={disabled ? undefined : onClick}
-      className={`absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white/90 text-slate-700 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
+      className={`absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border bg-white/90 shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${
         previous ? "left-1" : "right-1"
-      } ${disabled ? "cursor-not-allowed opacity-40" : "hover:bg-white"}`}
+      } ${disabled ? "cursor-not-allowed border-slate-200 text-slate-300" : "border-slate-300 text-slate-700 hover:bg-white"}`}
     >
       <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={previous ? "M12 4l-6 6 6 6" : "M8 4l6 6-6 6"} />
@@ -311,6 +326,10 @@ function Arrow({ direction, disabled, onClick }: { direction: "previous" | "next
  *
  * Com `navigation`, tem setas para o ficheiro anterior e o seguinte (e as teclas ← e →) e diz onde está («2 de 5»). As teclas ouvem-se no
  * documento e por isso calam-se quando o foco está dentro do leitor de PDF, que usa as setas para mudar de página.
+ *
+ * O foco não se move ao mudar de ficheiro, por isso o contador é o único aviso a quem usa um leitor de ecrã: `aria-atomic` para ler «2 de 5»
+ * inteiro (e não só o algarismo que mudou) e o nome do ficheiro, escondido da vista, para dizer qual é. A seta desativada esbate-se sem
+ * `opacity` (que apagava também o anel de foco, e o foco fica ali quando se chega ao fim).
  */
 export function PreviewDialog({ file, onClose, navigation }: { file: FileItem; onClose: () => void; navigation?: PreviewNavigation }) {
   const id = encodeURIComponent(file.id);
@@ -342,8 +361,9 @@ export function PreviewDialog({ file, onClose, navigation }: { file: FileItem; o
         </div>
       </div>
       {navigation && (
-        <p aria-live="polite" className="mt-3 text-center text-sm text-slate-500">
-          {navigation.index + 1} de {navigation.total}
+        <p aria-live="polite" aria-atomic="true" className="mt-3 text-center text-sm text-slate-500">
+          {`${navigation.index + 1} de ${navigation.total}`}
+          <span className="sr-only">: {file.name}</span>
         </p>
       )}
       <div className="mt-4 flex justify-end gap-2">
@@ -351,7 +371,7 @@ export function PreviewDialog({ file, onClose, navigation }: { file: FileItem; o
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  43 passed (43)`, `Tests  340 passed (340)`.
+Expected: `Test Files  43 passed (43)`, `Tests  341 passed (341)`.
 
 - [ ] **Step 3: Verificação e commit**
 
@@ -471,6 +491,12 @@ por:
 Em `src/web/components/Tiles.test.tsx`, trocar:
 
 ```tsx
+  });
+
+  it("um ficheiro que não se pré-visualiza mostra o ícone e a extensão, e não é um botão", () => {
+    const { container } = renderTile(<FileTile file={file("nota.txt", 10)} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByText("TXT")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Pré-visualizar/ })).not.toBeInTheDocument();
   });
 
@@ -494,6 +520,12 @@ Em `src/web/components/Tiles.test.tsx`, trocar:
 por:
 
 ```tsx
+  });
+
+  it("um ficheiro que não se pré-visualiza mostra o ícone e a extensão, e não é um botão", () => {
+    const { container } = renderTile(<FileTile file={file("nota.txt", 10)} onPreview={() => undefined} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByText("TXT")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Pré-visualizar/ })).not.toBeInTheDocument();
   });
 
@@ -732,6 +764,9 @@ describe("usePreviewer", () => {
     rerender(<List files={[A, C]} />);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    rerender(<List files={[A, B, C]} />); // o ficheiro volta (restaurado, ou renomeado de volta): o diálogo não reabre sozinho
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("se a lista muda à volta do ficheiro aberto, o diálogo continua nele (pelo id) e conta de novo", async () => {
@@ -780,7 +815,7 @@ describe("usePreviewer", () => {
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: FAIL (Test Files  4 failed | 40 passed (44); Tests  7 failed | 340 passed (347)). `previewer.test.tsx` nem arranca (o módulo não existe) e falham os testes novos de `Tiles`, `FolderPage` e `SearchPage`.
+Expected: FAIL (Test Files  4 failed | 40 passed (44); Tests  7 failed | 341 passed (348)). `previewer.test.tsx` nem arranca (o módulo não existe) e falham os testes novos de `Tiles`, `FolderPage` e `SearchPage`.
 
 - [ ] **Step 2: A implementação**
 
@@ -1232,7 +1267,8 @@ import { PreviewDialog } from "./components/PreviewDialog";
  * A pré-visualização de uma lista de ficheiros (uma pasta, os resultados de uma pesquisa). `open(file)` abre o diálogo nesse ficheiro e as
  * setas passam ao anterior e ao seguinte **dos que se pré-visualizam**, pela ordem da lista. O diálogo é da página e não de cada linha
  * ou quadrado, para conhecer a lista toda. O ficheiro aberto guarda-se pelo id: se a lista muda à volta dele o diálogo continua nele e se
- * ele sai da lista (foi excluído, ou renomeado para um tipo sem pré-visualização) o diálogo fecha-se.
+ * ele sai da lista (foi excluído, ou renomeado para um tipo sem pré-visualização) o diálogo fecha-se e esquece-o: se o ficheiro voltar à
+ * lista, o diálogo não reabre sozinho.
  *
  * Ao fechar, o foco volta ao botão que abriu o diálogo (o menu «⋮», por exemplo); mas se se passou a outro ficheiro, vai para o botão do ficheiro
  * que está à vista (o que tem `data-preview-id`: o nome de uma linha, o rosto de um quadrado), porque o que abriu já não tem a ver com o que se vê.
@@ -1249,6 +1285,7 @@ export function usePreviewer(files: FileItem[]): { open: (file: FileItem) => voi
       shown.current = currentId;
       return;
     }
+    if (currentId !== null) setCurrentId(null); // o ficheiro saiu da lista: esquecê-lo, senão o diálogo reabria se voltasse
     const id = shown.current;
     shown.current = null;
     if (id === null || id === opened.current) return; // o Modal já devolveu o foco a quem o abriu
@@ -1284,7 +1321,7 @@ export function usePreviewer(files: FileItem[]): { open: (file: FileItem) => voi
 ```
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  44 passed (44)`, `Tests  355 passed (355)`.
+Expected: `Test Files  44 passed (44)`, `Tests  356 passed (356)`.
 
 - [ ] **Step 3: Verificação e commit**
 
@@ -1326,7 +1363,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 test("a pré-visualização passa de uma imagem à seguinte com as setas e com o teclado, e ao fechar o foco volta à que estava à vista", async ({ page }) => {
   await signUp(page);
   await upload(page, "a.png", PNG, "image/png");
-  await upload(page, "nota.txt", "olá"); // o texto não se pré-visualiza: as setas saltam-no
+  await upload(page, "ab.txt", "olá"); // o texto não se pré-visualiza: a lista é por ordem alfabética, fica entre a.png e b.png e as setas saltam-no
   await upload(page, "b.png", PNG, "image/png");
   await upload(page, "c.png", PNG, "image/png");
 
@@ -1345,6 +1382,7 @@ test("a pré-visualização passa de uma imagem à seguinte com as setas e com o
     const dialog = page.getByRole("dialog", { name: "c.png" });
     await expect(dialog.getByText("3 de 3")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Ficheiro seguinte" })).toHaveAttribute("aria-disabled", "true");
+    await expect(dialog.getByRole("button", { name: "Ficheiro seguinte" })).toBeFocused(); // desativada, mas com o foco: não se perde
     const image = dialog.getByRole("img", { name: "c.png" });
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(1);
   });
@@ -1450,7 +1488,7 @@ Run: `npx vitest run`
 Expected: `Test Files  37 passed (37)`, `Tests  346 passed (346)`.
 
 Run: `npx vitest run -c vitest.web.config.ts`
-Expected: `Test Files  44 passed (44)`, `Tests  355 passed (355)`.
+Expected: `Test Files  44 passed (44)`, `Tests  356 passed (356)`.
 
 Run: `npm run typecheck`
 Expected: o `tsc` não imprime nada (só aparecem as linhas `> typecheck` e `> tsc -b` do npm).
@@ -1481,7 +1519,7 @@ git commit -m "Documenta a navegação na pré-visualização e acrescenta o tes
 
 **Fora deste plano:** deslizar o dedo para mudar de imagem no telemóvel; dar a volta no fim da lista; as teclas Home e End; pré-carregar a imagem seguinte (a API responde com `no-store`, por isso cada imagem é uma descarga inteira de qualquer modo); passar a ver os ficheiros partilhados desta forma.
 
-**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 346 passed (346). Interface: Test Files 44 passed (44); Tests 355 passed (355). Ponta a ponta: 25 testes do Playwright.
+**Totais de testes (medidos na execução deste plano numa pasta limpa):** Worker: Test Files 37 passed (37); Tests 346 passed (346). Interface: Test Files 44 passed (44); Tests 356 passed (356). Ponta a ponta: 25 testes do Playwright.
 
 ## Notas da execução
 
